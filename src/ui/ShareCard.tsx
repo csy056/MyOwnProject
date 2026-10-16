@@ -11,8 +11,11 @@ import { colors, fonts, space } from './theme';
 export type ShareCardData = {
   headline: string; // 예: "마포구에서 5.20km"
   sub: string; // 예: "블록 46칸 탈환 · 포위 1회 · 5'48\"/km"
-  ascii: string;
+  ascii?: string;
   day: number;
+  quote?: string; // 카드에 넣을 한 줄 (인물 대사나 엔딩 문장)
+  quoteBy?: string;
+  kicker?: string; // 맨 위 작은 글씨. 기본: "경계선 · 벽이 생긴 지 N일"
 };
 
 type ViewRef = ComponentRef<typeof View>;
@@ -20,12 +23,20 @@ type ViewRef = ComponentRef<typeof View>;
 export function ShareCard({ data, cardRef }: { data: ShareCardData; cardRef: Ref<ViewRef> }) {
   return (
     <View ref={cardRef} collapsable={false} style={styles.card}>
-      <Text style={styles.kicker}>경계선 · 벽이 생긴 지 {data.day}일</Text>
+      <Text style={styles.kicker}>{data.kicker ?? `경계선 · 벽이 생긴 지 ${data.day}일`}</Text>
       <Text style={styles.headline}>{data.headline}</Text>
       <Text style={styles.sub}>{data.sub}</Text>
-      <View style={styles.artBox}>
-        <Text style={styles.art}>{data.ascii}</Text>
-      </View>
+      {data.quote ? (
+        <View style={styles.quoteBox}>
+          <Text style={styles.quote}>“{data.quote}”</Text>
+          {data.quoteBy ? <Text style={styles.quoteBy}>— {data.quoteBy}</Text> : null}
+        </View>
+      ) : null}
+      {data.ascii ? (
+        <View style={styles.artBox}>
+          <Text style={styles.art}>{data.ascii}</Text>
+        </View>
+      ) : null}
       <Text style={styles.tagline}>달려라. 지도에서 지워지기 전에.</Text>
     </View>
   );
@@ -62,5 +73,8 @@ const styles = StyleSheet.create({
   sub: { color: colors.accent, fontSize: 15, marginTop: space.xs, fontFamily: fonts.body },
   artBox: { marginVertical: space.lg, alignItems: 'center' },
   art: { color: colors.text, fontFamily: fonts.mono, fontSize: 16, lineHeight: 18, letterSpacing: 3 },
-  tagline: { color: colors.textDim, fontSize: 13, fontFamily: fonts.body },
+  tagline: { color: colors.textDim, fontSize: 13, fontFamily: fonts.body, marginTop: space.sm },
+  quoteBox: { marginTop: space.lg, gap: 4 },
+  quote: { color: colors.text, fontSize: 17, lineHeight: 27, fontFamily: fonts.body },
+  quoteBy: { color: colors.textDim, fontSize: 13, fontFamily: fonts.body },
 });

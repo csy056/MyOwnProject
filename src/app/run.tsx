@@ -14,6 +14,7 @@ import { useGame } from '@/state/store';
 import { Button, Card, Header, Screen, T } from '@/ui/components';
 import { cellsToAscii, shareText } from '@/ui/share';
 import { ShareCard, useShareCard } from '@/ui/ShareCard';
+import { doyunQuote } from '@/content/quotes';
 import { currentStats } from '@/engine/gameSession';
 import { colors, fonts, space } from '@/ui/theme';
 
@@ -249,6 +250,8 @@ export default function Run() {
                 headline: `${world ? `${world.area}에서 ` : ''}${summary.km.toFixed(2)}km`,
                 sub: `블록 ${summary.newCells.length}칸 탈환${summary.loops ? ` · 포위 ${summary.loops}회` : ''} · ${formatPace(summary.paceSec)}/km`,
                 ascii,
+                quote: doyunQuote(summary.km, summary.loops > 0),
+                quoteBy: '강도윤, 선꾼',
               }}
             />
             <T faint size={12}>■ 이번에 되찾은 블록 · ▣ 원래 내 블록 (축소 그림, 실제 지도·좌표 없음)</T>

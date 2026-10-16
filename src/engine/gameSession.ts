@@ -1,5 +1,6 @@
 import storyJson from '@/story/story.json';
 import storyVersion from '@/story/version.json';
+import { RADIO_LOGS } from '@/content/radio';
 import { isNight } from '@/location/daynight';
 import { useGame, type Save, type Screen, type World } from '@/state/store';
 
@@ -84,7 +85,7 @@ export function currentStats(): Stats | null {
 }
 
 /** 허브에서 보여 줄 목표와 경고. 스토리 변수만 읽는다. */
-export function hubHints(): { goal: string; warnings: string[] } | null {
+export function hubHints(): { goal: string; warnings: string[]; next: string | null } | null {
   if (!engine) return null;
   const n = (k: string) => Number(engine!.getVar(k)) || 0;
   const chapter = n('chapter');
@@ -98,11 +99,24 @@ export function hubHints(): { goal: string; warnings: string[] } | null {
   else if (day < nextDay) goal = `다음 이야기까지 ${nextDay - day}일. 그동안 탐색하고, 거점을 돌보고, 달려라.`;
   else goal = `${chapter + 1}장을 따라갈 수 있다.`;
   const warnings: string[] = [];
+  if (engine.getVar('pending_debrief') === true) warnings.push('보고하지 않은 원정이 있다. 먼저 "원정 보고를 한다"를 고르라.');
   if (n('food') <= 0) warnings.push('식량이 없다. 이대로 하루가 지나면 체력이 깎인다. 탐색하거나 달려서 보급하라.');
   else if (n('food') === 1) warnings.push('식량이 하루치 남았다.');
   if (n('hp') <= 3) warnings.push('체력이 낮다. 쉬거나 거점을 강화하라.');
   if (n('mind') <= 3) warnings.push('정신이 흔들린다. 쉬거나 사람들과 이야기하라.');
-  return { goal, warnings };
+  return { goal, warnings, next: nextRunMilestone() };
+}
+
+/** 다음 러닝 이정표(무전 해금)까지의 진행도. 러닝을 한 번도 안 했으면 첫 원정을 권한다. */
+function nextRunMilestone(): string | null {
+  const t = useGame.getState().totals;
+  const label = { runs: '원정', km: '누적', loops: '포위', cells: '블록' } as const;
+  const unit = { runs: '회', km: 'km', loops: '회', cells: '칸' } as const;
+  const next = RADIO_LOGS.find((r) => t[r.condition.kind] < r.condition.atLeast);
+  if (!next) return null;
+  const k = next.condition.kind;
+  const have = k === 'km' ? t.km.toFixed(1) : String(t[k]);
+  return `다음 무전까지: ${label[k]} ${have}/${next.condition.atLeast}${unit[k]}`;
 }
 
 /** 새 게임을 시작한다. */
@@ -224,7 +238,18 @@ export function choose(index: number) {
   if (!engine || !store.save) return;
   const rewind = { inkState: engine.saveState(), screen: store.save.screen, storyVersion: STORY_VERSION };
   engine.choose(index);
-  const step = advance(engine);
+  let step = advance(engine);
+  // 체력이나 정신이 바닥난 그 선택에서 바로 엔딩으로 간다.
+  // 그래야 되감기가 원인이 된 선택 직전으로 돌아간다. (허브까지 미루면 무관한 선택으로 되감긴다)
+  if (!step.ended) {
+    const { hp, mind } = engine.stats();
+    const fatal = hp <= 0 ? 'ending_death' : mind <= 0 ? 'ending_erased' : null;
+    if (fatal) {
+      engine.jumpTo(fatal);
+      const end = advance(engine);
+      step = { ...end, pages: [...step.pages, ...end.pages], clues: [...step.clues, ...end.clues] };
+    }
+  }
   persist(stepToScreen(step), rewind);
 }
 
@@ -252,6 +277,22 @@ export function rewindLastChoice(): boolean {
   // 끝난 게임이라 미뤄 둔 원정 보급이 있으면 이제 반영한다.
   applyPendingRun();
   return true;
+}
+
+/**
+ * 하루가 지나며 생긴 유지비(식량 소모, 굶주림, 정수기·발전기 효과)를 추정한다.
+ * 사건 보상과 섞여 "보상이 사라진" 것처럼 보이지 않도록 따로 표시하는 데 쓴다.
+ */
+export function dailyUpkeep(before: Stats, after: Stats): Partial<Record<'hp' | 'mind' | 'food', number>> {
+  const days = after.day - before.day;
+  if (!engine || days <= 0) return {};
+  const up: Partial<Record<'hp' | 'mind' | 'food', number>> = {};
+  const starving = before.food <= 0 && after.food <= 0;
+  if (starving) up.hp = -days;
+  else up.food = -days;
+  if (engine.getVar('up_water') === true) up.hp = (up.hp ?? 0) + days;
+  if (engine.getVar('up_generator') === true) up.mind = (up.mind ?? 0) + days;
+  return up;
 }
 
 export function abandonGame() {

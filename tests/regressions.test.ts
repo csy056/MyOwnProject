@@ -1,7 +1,7 @@
 /// <reference types="jest" />
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 
-import { currentStats, ensureLoaded, STORY_VERSION, startNewGame, unloadEngine } from '@/engine/gameSession';
+import { choose, currentStats, ensureLoaded, getEngine, rewindLastChoice, STORY_VERSION, startNewGame, unloadEngine } from '@/engine/gameSession';
 import { lookupRegion } from '@/location/regions';
 import { addPoint, createSession, formatPace, summarize, type RawPoint } from '@/run/session';
 import { useGame, type World } from '@/state/store';
@@ -129,6 +129,31 @@ describe('저장과 보급 회귀', () => {
     const s = useGame.getState().save!;
     expect(s.storyVersion).toBe(STORY_VERSION);
     expect(s.screen.pages[s.screen.pages.length - 1].hub).toBe(true);
+  });
+
+  test('체력이 바닥난 선택에서 바로 엔딩이 나고, 되감기는 그 선택 직전으로 간다', () => {
+    startNewGame(WORLD);
+    for (let i = 0; i < 200; i++) {
+      const s = useGame.getState().save!.screen;
+      if (s.pages[s.pages.length - 1]?.hub && s.pageIndex === s.pages.length - 1) break;
+      if (s.pageIndex < s.pages.length - 1) {
+        useGame.getState().setSave({ ...useGame.getState().save!, screen: { ...s, pageIndex: s.pageIndex + 1 } });
+        continue;
+      }
+      choose(s.choices[0].index);
+    }
+    const hub = useGame.getState().save!.screen;
+    getEngine()!.setVar('hp', 0);
+    getEngine()!.setVar('food', 0);
+    const explore = hub.choices.find((c) => c.text.includes('탐색'))!;
+    choose(explore.index);
+    const after = useGame.getState().save!.screen;
+    expect(after.ended).toBe(true);
+    expect(after.endingId).toBe('death');
+    expect(rewindLastChoice()).toBe(true);
+    const back = useGame.getState().save!.screen;
+    expect(back.ended).toBe(false);
+    expect(back.choices.map((c) => c.text)).toEqual(hub.choices.map((c) => c.text));
   });
 
   test('읽을 수 없는 저장도 앱을 멈추지 않는다', () => {

@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ENDING_INFO } from '@/content/endings';
-import { abandonGame, applyPendingRun, choose, currentStats, ensureLoaded, grantDiscoveryReward, hubHints, nextPage, rewindLastChoice } from '@/engine/gameSession';
+import { abandonGame, applyPendingRun, choose, currentStats, dailyUpkeep, ensureLoaded, grantDiscoveryReward, hubHints, nextPage, rewindLastChoice } from '@/engine/gameSession';
 import type { Stats } from '@/engine/storyEngine';
 import { isNight } from '@/location/daynight';
 import { locateRegion } from '@/location/locate';
@@ -13,9 +13,10 @@ import { watchRewardedAd } from '@/monetization';
 import { useGame } from '@/state/store';
 import { Button, T } from '@/ui/components';
 import { shareText } from '@/ui/share';
+import { ShareCard, useShareCard } from '@/ui/ShareCard';
 import { colors, fonts, space, textSizes } from '@/ui/theme';
 
-type Delta = { label: string; value: number; color: string };
+type Delta = { label: string; value: number; color: string; upkeep?: boolean };
 
 const DELTA_LABELS: Partial<Record<keyof Stats, [string, string]>> = {
   hp: ['체력', colors.danger],
@@ -28,10 +29,18 @@ const DELTA_LABELS: Partial<Record<keyof Stats, [string, string]>> = {
 
 function diff(a: Stats | null, b: Stats | null): Delta[] {
   if (!a || !b) return [];
+  // 하루 유지비는 사건 결과와 떼어 흐리게 따로 보인다.
+  const upkeep = dailyUpkeep(a, b);
   const out: Delta[] = [];
   for (const [k, [label, color]] of Object.entries(DELTA_LABELS) as [keyof Stats, [string, string]][]) {
-    const d = b[k] - a[k];
+    const u = (upkeep as Record<string, number | undefined>)[k] ?? 0;
+    const d = b[k] - a[k] - u;
     if (d !== 0) out.push({ label, value: d, color });
+  }
+  for (const [k, v] of Object.entries(upkeep) as [keyof typeof upkeep, number][]) {
+    if (!v) continue;
+    const [label] = DELTA_LABELS[k as keyof Stats]!;
+    out.push({ label: `하루 지남 · ${label}`, value: v, color: colors.textFaint, upkeep: true });
   }
   return out;
 }
@@ -60,6 +69,7 @@ function HubPanel() {
   return (
     <View style={styles.hubPanel} accessibilityRole="summary">
       <Text style={styles.hubGoal}>{hints.goal}</Text>
+      {hints.next ? <Text style={styles.hubGoal}>{hints.next}</Text> : null}
       {hints.warnings.map((w) => (
         <Text key={w} style={styles.hubWarn}>
           {w}
@@ -78,6 +88,7 @@ export default function Game() {
   const [deltas, setDeltas] = useState<Delta[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const card = useShareCard();
 
   // 화면에 들어올 때마다: 엔진 준비, 러닝 결과 반영, 구역 발견(L3)
   useFocusEffect(
@@ -163,10 +174,10 @@ export default function Game() {
       </View>
 
       <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={styles.body}>
-        {deltas.length > 0 ? (
+        {deltas.length > 0 && !screen.ended ? (
           <View style={styles.deltas}>
             {deltas.map((d) => (
-              <Text key={d.label} style={[styles.delta, { borderColor: d.color, color: d.color }]}>
+              <Text key={d.label} style={[styles.delta, { borderColor: d.color, color: d.color }, d.upkeep && styles.deltaUpkeep]}>
                 {d.label} {d.value > 0 ? `+${d.value}` : d.value}
               </Text>
             ))}
@@ -190,8 +201,16 @@ export default function Game() {
 
         {ending ? (
           <View style={styles.ending}>
-            <T faint mono size={12}>ENDING</T>
-            <T size={26} style={{ marginVertical: space.sm }}>{ending.title}</T>
+            <ShareCard
+              cardRef={card.ref}
+              data={{
+                day: stats?.day ?? 412,
+                kicker: `경계선 · ENDING · ${stats?.day ?? 412}일째`,
+                headline: ending.title,
+                sub: world.dome === world.area ? `${world.dome} 벽 안` : `${world.dome} 벽 안, ${world.area}`,
+                quote: ending.line,
+              }}
+            />
             {canRewind ? (
               <Button
                 testID="btn-rewind"
@@ -210,14 +229,16 @@ export default function Game() {
             ) : null}
             <Button
               label="공유하기"
-              onPress={() =>
-                shareText(
-                  `[경계선] ${world.dome === world.area ? `${world.dome} 벽 안에서` : `${world.dome} 벽 안, ${world.area}에서`} ${stats?.day ?? 412}일째.\n엔딩: ${ending.title}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기`,
+              sub="이미지 카드로 공유 (지원되지 않으면 문구로)"
+              onPress={async () => {
+                if (await card.shareImage()) return;
+                await shareText(
+                  `[경계선] ${world.dome === world.area ? `${world.dome} 벽 안에서` : `${world.dome} 벽 안, ${world.area}에서`} ${stats?.day ?? 412}일째.\n엔딩: ${ending.title}${ending.line ? `\n“${ending.line}”` : ''}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기`,
                 ).then((r) => {
                   if (r === 'copied') setToast('공유 문구를 복사했습니다.');
                   else if (r === 'failed') setToast('공유하지 못했습니다.');
-                })
-              }
+                });
+              }}
             />
             <Button
               label="처음으로"
@@ -284,6 +305,7 @@ const styles = StyleSheet.create({
   clueText: { color: colors.text, fontSize: 15 },
   deltas: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: space.md },
   delta: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, fontSize: 12, overflow: 'hidden' },
+  deltaUpkeep: { borderStyle: 'dashed' },
   choices: { padding: space.md, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.bgSunken },
   ending: { marginTop: space.xl, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.line },
   hubRow: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
