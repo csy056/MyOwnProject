@@ -49,8 +49,7 @@
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
-      ],
-      "expo-speech"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

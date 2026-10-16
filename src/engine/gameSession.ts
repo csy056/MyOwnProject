@@ -89,16 +89,21 @@ function persist(screen: Screen, rewind?: Save['rewind']) {
   store.setSave({ ...store.save, inkState: engine.saveState(), screen, rewind: rewind ?? store.save.rewind });
 }
 
-/** 현재 화면이 허브라면 허브를 다시 그려 새 선택지(원정 보고 등)를 반영한다. */
+/**
+ * 화면의 마지막 장이 허브라면 허브를 다시 그려 새 선택지(원정 보고 등)를 반영한다.
+ * 허브 선택지는 허브에 도착한 순간 계산되므로, 그 뒤에 바뀐 앱 변수는 다시 그려야 보인다.
+ * 아직 읽지 않은 앞 장들은 그대로 둔다.
+ */
 function refreshHubIfIdle() {
   const store = useGame.getState();
   const screen = store.save?.screen;
   if (!engine || !screen || screen.ended) return;
   const last = screen.pages[screen.pages.length - 1];
-  if (!last?.hub || screen.pageIndex !== screen.pages.length - 1) return;
+  if (!last?.hub) return;
   engine.jumpTo('hub');
   const step = advance(engine);
-  persist(stepToScreen(step));
+  const pages = [...screen.pages.slice(0, -1), ...step.pages];
+  persist({ ...stepToScreen(step), pages, pageIndex: Math.min(screen.pageIndex, pages.length - 1) });
 }
 
 /** 러닝 결과를 스토리 변수에 반영한다. 보고는 다음 허브에서 할 수 있다. */

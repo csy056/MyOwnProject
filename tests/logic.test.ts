@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import { josa } from '@/engine/josa';
 import { isNight } from '@/location/daynight';
 import { lookupRegion, regionsInSido, sidoList, TOTAL_REGION_COUNT } from '@/location/regions';

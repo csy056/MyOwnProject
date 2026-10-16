@@ -74,7 +74,11 @@ export async function startTracking(onPoints: (points: RawPoint[]) => void, pref
     mode: 'foreground',
     stop: async () => {
       sub.remove();
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
+      try {
+        await deactivateKeepAwake(KEEP_AWAKE_TAG);
+      } catch {
+        // 화면 꺼짐 방지가 켜지지 않았던 경우(일부 브라우저) 무시한다.
+      }
       await clearBuffer();
     },
   };

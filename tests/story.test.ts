@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import storyJson from '@/story/story.json';
 import { StoryEngine } from '@/engine/storyEngine';
 
