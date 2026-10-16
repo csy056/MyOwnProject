@@ -83,6 +83,28 @@ export function currentStats(): Stats | null {
   return engine ? engine.stats() : null;
 }
 
+/** 허브에서 보여 줄 목표와 경고. 스토리 변수만 읽는다. */
+export function hubHints(): { goal: string; warnings: string[] } | null {
+  if (!engine) return null;
+  const n = (k: string) => Number(engine!.getVar(k)) || 0;
+  const chapter = n('chapter');
+  const day = n('day');
+  const nextDay = n('next_chapter_day');
+  const clues = n('clues');
+  let goal: string;
+  if (chapter >= 8) goal = '이야기의 끝이 가깝다.';
+  else if (chapter === 3 && clues < 2) goal = `다음 이야기를 열려면 단서가 더 필요하다. (${clues}/2) 탐색하고 거점 사람들과 이야기하라.`;
+  else if (chapter === 6 && clues < 4) goal = `다음 이야기를 열려면 단서가 더 필요하다. (${clues}/4) 탐색하고 거점 사람들과 이야기하라.`;
+  else if (day < nextDay) goal = `다음 이야기까지 ${nextDay - day}일. 그동안 탐색하고, 거점을 돌보고, 달려라.`;
+  else goal = `${chapter + 1}장을 따라갈 수 있다.`;
+  const warnings: string[] = [];
+  if (n('food') <= 0) warnings.push('식량이 없다. 이대로 하루가 지나면 체력이 깎인다. 탐색하거나 달려서 보급하라.');
+  else if (n('food') === 1) warnings.push('식량이 하루치 남았다.');
+  if (n('hp') <= 3) warnings.push('체력이 낮다. 쉬거나 거점을 강화하라.');
+  if (n('mind') <= 3) warnings.push('정신이 흔들린다. 쉬거나 사람들과 이야기하라.');
+  return { goal, warnings };
+}
+
 /** 새 게임을 시작한다. */
 export function startNewGame(world: World) {
   const e = createEngine();

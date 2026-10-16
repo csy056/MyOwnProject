@@ -28,7 +28,7 @@ export default function Title() {
 
       <View style={{ gap: space.xs }}>
         {canContinue ? (
-          <Button testID="btn-continue" kind="primary" label="이어하기" sub={`${world!.dome} · ${world!.area}`} onPress={() => router.push('/game')} />
+          <Button testID="btn-continue" kind="primary" label="이어하기" sub={world!.dome === world!.area ? world!.area : `${world!.dome} · ${world!.area}`} onPress={() => router.push('/game')} />
         ) : null}
         <Button
           testID="btn-new"

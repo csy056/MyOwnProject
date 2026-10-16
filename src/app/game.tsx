@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ENDING_INFO } from '@/content/endings';
-import { abandonGame, applyPendingRun, choose, currentStats, ensureLoaded, grantDiscoveryReward, nextPage, rewindLastChoice } from '@/engine/gameSession';
+import { abandonGame, applyPendingRun, choose, currentStats, ensureLoaded, grantDiscoveryReward, hubHints, nextPage, rewindLastChoice } from '@/engine/gameSession';
 import type { Stats } from '@/engine/storyEngine';
 import { isNight } from '@/location/daynight';
 import { locateRegion } from '@/location/locate';
@@ -50,6 +50,21 @@ function Meter({ label, value, color }: { label: string; value: number; color: s
           <View key={i} style={[styles.meterCell, { backgroundColor: i < value ? color : colors.line }]} />
         ))}
       </View>
+    </View>
+  );
+}
+
+function HubPanel() {
+  const hints = hubHints();
+  if (!hints) return null;
+  return (
+    <View style={styles.hubPanel} accessibilityRole="summary">
+      <Text style={styles.hubGoal}>{hints.goal}</Text>
+      {hints.warnings.map((w) => (
+        <Text key={w} style={styles.hubWarn}>
+          {w}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -135,7 +150,7 @@ export default function Game() {
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.statusTop}>
-            {world.dome} · {world.area} · {stats?.day ?? 412}일째 {night ? '· 밤' : ''}
+            {world.dome === world.area ? world.area : `${world.dome} · ${world.area}`} · {stats?.day ?? 412}일째 {night ? '· 밤' : ''}
           </Text>
           <View style={styles.statusRow}>
             <Meter label="체력" value={stats?.hp ?? 0} color={colors.danger} />
@@ -171,6 +186,8 @@ export default function Game() {
           ),
         )}
 
+        {lastPage && page?.hub && !screen.ended ? <HubPanel /> : null}
+
         {ending ? (
           <View style={styles.ending}>
             <T faint mono size={12}>ENDING</T>
@@ -195,7 +212,7 @@ export default function Game() {
               label="공유하기"
               onPress={() =>
                 shareText(
-                  `[경계선] ${world.dome} 벽 안, ${world.area}에서 ${stats?.day ?? 412}일째.\n엔딩: ${ending.title}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기`,
+                  `[경계선] ${world.dome === world.area ? `${world.dome} 벽 안에서` : `${world.dome} 벽 안, ${world.area}에서`} ${stats?.day ?? 412}일째.\n엔딩: ${ending.title}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기`,
                 ).then((r) => {
                   if (r === 'copied') setToast('공유 문구를 복사했습니다.');
                   else if (r === 'failed') setToast('공유하지 못했습니다.');
@@ -270,6 +287,9 @@ const styles = StyleSheet.create({
   choices: { padding: space.md, borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.bgSunken },
   ending: { marginTop: space.xl, paddingTop: space.lg, borderTopWidth: 1, borderTopColor: colors.line },
   hubRow: { flexDirection: 'row', gap: space.sm, marginTop: space.sm },
+  hubPanel: { marginTop: space.lg, paddingTop: space.md, borderTopWidth: 1, borderTopColor: colors.line, gap: space.xs },
+  hubGoal: { color: colors.textDim, fontSize: 14, lineHeight: 22, fontFamily: fonts.body },
+  hubWarn: { color: colors.danger, fontSize: 14, lineHeight: 22, fontFamily: fonts.body },
   hubBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 6, borderWidth: 1, borderColor: colors.accentDim },
   hubBtnText: { color: colors.accent, fontSize: 13 },
   toast: { position: 'absolute', left: space.lg, right: space.lg, top: 90, backgroundColor: colors.bgRaised, borderColor: colors.accent, borderWidth: 1, borderRadius: 8, padding: space.md },

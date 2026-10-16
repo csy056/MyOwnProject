@@ -83,7 +83,7 @@ export default function Start() {
         <Card>
           <T faint size={13}>{detect.region.sido}</T>
           <T size={20} style={{ marginVertical: space.sm }}>
-            {detect.region.dome} 벽 안, {detect.region.area}
+            {detect.region.dome === detect.region.area ? `${detect.region.dome} 벽 안` : `${detect.region.dome} 벽 안, ${detect.region.area}`}
           </T>
           <T dim>이곳에서 412일을 버틴 생존자로 시작합니다.</T>
           <View style={{ height: space.md }} />
