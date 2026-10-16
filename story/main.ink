@@ -197,10 +197,11 @@ EXTERNAL josa(word, kind)
         }
     }
 }
-+ {main_ready()} [이야기를 따라간다]
-    -> main_story
+// 원정 보고는 맨 위에 둔다. (손에 익은 첫 자리를 눌러 보고를 놓치지 않게)
 + {pending_debrief} [원정 보고를 한다]
     -> debrief
++ {main_ready()} [이야기를 따라간다]
+    -> main_story
 + [주변을 탐색한다]
     -> explore
 + [거점을 돌본다]
@@ -209,6 +210,12 @@ EXTERNAL josa(word, kind)
     -> rest
 
 === main_story ===
+# CLEAR
+// 보고하지 않은 원정이 있으면 장에 들어가기 전에 먼저 보고한다. (8장은 돌아오지 않는다)
+{ pending_debrief:
+    -> run_debrief ->
+    ~ pending_debrief = false
+}
 # CLEAR
 { chapter:
 - 0: -> act1_ch1 ->
