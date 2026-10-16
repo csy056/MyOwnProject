@@ -15,11 +15,15 @@ if (scripts.length === 0) throw new Error('dist/index.html 에서 스크립트�
 
 fs.mkdirSync(out, { recursive: true });
 const files = {};
+// 일부 호스팅은 "_"로 시작하는 경로를 예약하므로 js/ 아래로 옮긴다.
+const published = [];
 for (const s of scripts) {
-  const dest = path.join(out, s);
+  const rel = `js/${path.basename(s)}`;
+  const dest = path.join(out, rel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(path.join(dist, s), dest);
-  files[s] = dest;
+  files[rel] = dest;
+  published.push(rel);
 }
 
 const page = `<title>경계선</title>
@@ -31,7 +35,7 @@ const page = `<title>경계선</title>
 </style>
 <noscript>JavaScript를 켜야 플레이할 수 있습니다.</noscript>
 <div id="root"></div>
-${scripts.map((s) => `<script src="${s}" defer></script>`).join('\n')}
+${published.map((s) => `<script src="${s}" defer></script>`).join('\n')}
 `;
 fs.writeFileSync(path.join(out, 'index.html'), page);
 fs.writeFileSync(path.join(out, 'files.json'), JSON.stringify(files, null, 2));
