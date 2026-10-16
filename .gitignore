@@ -51,3 +51,4 @@ coverage/
 
 # web demo build output
 web-demo/
+e2e/shots/
