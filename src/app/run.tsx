@@ -13,6 +13,8 @@ import { drainBuffer, startTracking, type Tracker } from '@/run/tracker';
 import { useGame } from '@/state/store';
 import { Button, Card, Header, Screen, T } from '@/ui/components';
 import { cellsToAscii, shareText } from '@/ui/share';
+import { ShareCard, useShareCard } from '@/ui/ShareCard';
+import { currentStats } from '@/engine/gameSession';
 import { colors, fonts, space } from '@/ui/theme';
 
 type Phase = 'ready' | 'starting' | 'running' | 'result';
@@ -46,6 +48,7 @@ export default function Run() {
   const [result, setResult] = useState<Result | null>(null);
   const sessionRef = useRef<RunSession | null>(null);
   const trackerRef = useRef<Tracker | null>(null);
+  const card = useShareCard();
 
   const allowed = consent && age === true;
 
@@ -181,8 +184,9 @@ export default function Run() {
     const ascii = cellsToAscii(owned, new Set(summary.newCells));
     const dateKey = localDateKey();
     const canDouble = summary.valid && !reward.capped && reward.food + reward.parts > 0 && !result.doubled && !useGame.getState().doubledByDate[dateKey];
+    const day = currentStats()?.day ?? 412;
     const shareMsg =
-      `[경계선] 벽이 생긴 지 412일째, ${world ? `${world.area}에서 ` : ''}${summary.km.toFixed(2)}km를 달려 블록 ${summary.newCells.length}칸을 되찾았다.` +
+      `[경계선] 벽이 생긴 지 ${day}일째, ${world ? `${world.area}에서 ` : ''}${summary.km.toFixed(2)}km를 달려 블록 ${summary.newCells.length}칸을 되찾았다.` +
       `${summary.loops ? ` 포위 ${summary.loops}회.` : ''} 평균 ${formatPace(summary.paceSec)}/km\n\n${ascii}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기 #러닝`;
     return (
       <Screen>
@@ -204,10 +208,16 @@ export default function Run() {
               <Stat label="포위" value={`${summary.loops}`} unit="회" />
               <Stat label="밟은 블록" value={`${summary.totalCells}`} unit="칸" />
             </View>
-            <Card>
-              <T mono size={15} style={{ letterSpacing: 2 }}>{ascii}</T>
-              <T faint size={12} style={{ marginTop: space.sm }}>■ 이번에 되찾은 블록 · ▣ 원래 내 블록 (축소 그림)</T>
-            </Card>
+            <ShareCard
+              cardRef={card.ref}
+              data={{
+                day,
+                headline: `${world ? `${world.area}에서 ` : ''}${summary.km.toFixed(2)}km`,
+                sub: `블록 ${summary.newCells.length}칸 탈환${summary.loops ? ` · 포위 ${summary.loops}회` : ''} · ${formatPace(summary.paceSec)}/km`,
+                ascii,
+              }}
+            />
+            <T faint size={12}>■ 이번에 되찾은 블록 · ▣ 원래 내 블록 (축소 그림, 실제 지도·좌표 없음)</T>
             <Card>
               {reward.capped ? (
                 <T dim>오늘 보급은 이미 {REWARD_RULES.dailyRewardedRuns}번 받았다. 블록과 기록은 그대로 남는다.</T>
@@ -238,7 +248,14 @@ export default function Run() {
                 }}
               />
             ) : null}
-            <Button label="공유하기" onPress={() => shareText(shareMsg)} />
+            <Button
+              testID="btn-share-run"
+              label="공유하기"
+              sub="이미지 카드로 공유 (지원되지 않으면 문구로)"
+              onPress={async () => {
+                if (!(await card.shareImage())) await shareText(shareMsg);
+              }}
+            />
           </>
         )}
         {hasGame ? <Button kind="primary" label="거점으로 돌아가기" onPress={() => router.replace('/game')} /> : null}
