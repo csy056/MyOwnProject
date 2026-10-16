@@ -217,7 +217,7 @@ export default function Game() {
       {!screen.ended || !lastPage ? (
         <View style={styles.choices}>
           {!lastPage ? (
-            <Button testID="btn-next" label="계속 ▸" onPress={onNext} />
+            <Button testID="btn-next" label="계속" onPress={onNext} />
           ) : (
             screen.choices.map((c, i) => (
               <Button key={`${c.index}-${c.text}`} testID={`choice-${i}`} label={c.text} onPress={() => onChoose(c.index)} />

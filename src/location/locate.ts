@@ -11,7 +11,9 @@ export type LocateResult =
 
 export async function requestForegroundPermission(): Promise<boolean> {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
+    // 일부 브라우저·임베드 환경은 권한 창을 띄우지 않고 응답도 하지 않는다. 10초 뒤에는 거부로 본다.
+    const timeout = new Promise<{ status: string }>((resolve) => setTimeout(() => resolve({ status: 'timeout' }), 10_000));
+    const { status } = await Promise.race([Location.requestForegroundPermissionsAsync(), timeout]);
     return status === 'granted';
   } catch {
     return false;

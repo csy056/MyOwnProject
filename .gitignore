@@ -48,3 +48,6 @@ example
 
 # test output
 coverage/
+
+# web demo build output
+web-demo/
