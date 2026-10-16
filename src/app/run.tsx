@@ -10,6 +10,9 @@ import { watchRewardedAd } from '@/monetization';
 import { computeReward, localDateKey, REWARD_RULES, type RunReward } from '@/run/rewards';
 import { addPoint, createSession, formatDuration, formatPace, summarize, type RawPoint, type RunEvent, type RunSession, type RunSummary } from '@/run/session';
 import { recoverInterruptedRun, startTracking, type Tracker } from '@/run/tracker';
+import { checkImport, IMPORT_RULES, parseGpx } from '@/run/gpx';
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import { useGame } from '@/state/store';
 import { Button, Card, Header, Screen, T } from '@/ui/components';
 import { cellsToAscii, shareText } from '@/ui/share';
@@ -51,6 +54,7 @@ export default function Run() {
   const trackerRef = useRef<Tracker | null>(null);
   const mountedRef = useRef(true);
   const stoppingRef = useRef(false);
+  const sourceRef = useRef<'live' | 'gpx'>('live');
   const [shareNote, setShareNote] = useState<string | null>(null);
   const card = useShareCard();
 
@@ -130,6 +134,7 @@ export default function Run() {
     setError(null);
     setPhase('starting');
     sessionRef.current = createSession(Date.now());
+    sourceRef.current = 'live';
     setLog([]);
     stoppingRef.current = false;
     try {
@@ -152,6 +157,31 @@ export default function Run() {
     }
   };
 
+  /** 다른 앱에서 내보낸 GPX 기록을 원정으로 가져온다. 좌표는 블록으로 바뀐 뒤 버려진다. */
+  const importGpx = async () => {
+    setError(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({ type: ['application/gpx+xml', 'application/xml', 'text/xml', '*/*'], copyToCacheDirectory: true });
+      if (picked.canceled || !picked.assets?.length) return;
+      const asset = picked.assets[0];
+      const text = asset.file ? await asset.file.text() : await new File(asset.uri).text();
+      const check = checkImport(parseGpx(text), Date.now(), useGame.getState().importedRuns);
+      if (!check.ok) {
+        setError(check.reason);
+        return;
+      }
+      const s = createSession(check.startedAt);
+      const owned = useGame.getState().ownedCells;
+      for (const p of check.points) addPoint(s, p, (id) => !!owned[id]);
+      useGame.getState().markImported(check.key);
+      sourceRef.current = 'gpx';
+      sessionRef.current = s;
+      finish(check.endedAt);
+    } catch (e) {
+      setError(`파일을 읽지 못했습니다. (${e instanceof Error ? e.message : String(e)})`);
+    }
+  };
+
   const finish = (now = Date.now()) => {
     const s = sessionRef.current;
     if (!s) return;
@@ -167,6 +197,7 @@ export default function Run() {
       reward = computeReward(summary, store.rewardedByDate[dateKey] ?? 0);
       store.commitRun(
         {
+          source: sourceRef.current,
           endedAt: now,
           km: summary.km,
           paceSec: summary.paceSec,
@@ -350,6 +381,12 @@ export default function Run() {
       </T>
       {error ? <T style={{ color: colors.danger, marginBottom: space.sm }}>{error}</T> : null}
       <Button testID="btn-start-run" kind="primary" label="원정 출발" onPress={start} />
+      <Button
+        testID="btn-import-gpx"
+        label="다른 앱 기록 가져오기 (GPX)"
+        sub={`Strava·Garmin 등에서 내보낸 최근 ${IMPORT_RULES.maxAgeHours}시간 안의 기록. 같은 규칙으로 블록이 된다`}
+        onPress={importGpx}
+      />
     </Screen>
   );
 }

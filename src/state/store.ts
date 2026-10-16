@@ -33,6 +33,7 @@ export type Save = {
 };
 
 export type RunRecord = {
+  source?: 'live' | 'gpx';
   endedAt: number;
   km: number;
   paceSec: number;
@@ -73,6 +74,7 @@ type State = {
   rewardedByDate: Record<string, number>;
   doubledByDate: Record<string, boolean>;
   pendingRun: PendingRun | null;
+  importedRuns: Record<string, number>; // 가져온 GPX 기록의 시작 시각 키 -> 가져온 시각
 
   // 설정
   textSize: TextSize;
@@ -91,6 +93,7 @@ type Actions = {
   markRadioRead: (id: string) => void;
   commitRun: (r: RunRecord, newCells: CellId[], loops: number, pending: PendingRun | null, dateKey: string, rewarded: boolean) => void;
   addPendingReward: (food: number, parts: number) => void;
+  markImported: (key: string) => void;
   consumePendingRun: () => PendingRun | null;
   resetGame: () => void;
   wipeAll: () => void;
@@ -112,6 +115,7 @@ const initial: State = {
   rewardedByDate: {},
   doubledByDate: {},
   pendingRun: null,
+  importedRuns: {},
   textSize: 'normal',
   voiceCues: true,
   haptics: true,
@@ -173,6 +177,7 @@ export const useGame = create<State & Actions>()(
               : pending,
         });
       },
+      markImported: (key) => set({ importedRuns: { ...get().importedRuns, [key]: Date.now() } }),
       addPendingReward: (food, parts) => {
         const p = get().pendingRun;
         if (p) set({ pendingRun: { ...p, food: p.food + food, parts: p.parts + parts } });
