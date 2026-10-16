@@ -27,8 +27,19 @@ export async function hasForegroundPermission(): Promise<boolean> {
   }
 }
 
-export async function locateRegion(): Promise<LocateResult> {
-  const granted = await hasForegroundPermission();
+/** 권한이 막혀 다시 물을 수 없는 상태인가 (그때는 기기 설정에서 켜야 한다) */
+export async function isPermissionBlocked(): Promise<boolean> {
+  try {
+    const p = await Location.getForegroundPermissionsAsync();
+    return p.status !== 'granted' && p.canAskAgain === false;
+  } catch {
+    return false;
+  }
+}
+
+export async function locateRegion(opts: { request?: boolean } = {}): Promise<LocateResult> {
+  let granted = await hasForegroundPermission();
+  if (!granted && opts.request) granted = await requestForegroundPermission();
   if (!granted) return { status: 'denied' };
   try {
     // 구역 판별에는 낮은 정확도로 충분하다. 최근 위치가 있으면 그걸 쓴다.

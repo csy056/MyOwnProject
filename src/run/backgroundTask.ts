@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LocationObject } from 'expo-location';
+import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
@@ -11,6 +12,9 @@ import type { RawPoint } from './session';
 
 export const RUN_TASK = 'borderline-run-location';
 export const RUN_BUFFER_KEY = 'borderline-run-buffer';
+export const RUN_ACTIVE_KEY = 'borderline-run-active';
+// Android AsyncStorage 한 칸은 약 2MB가 한계다. 점 하나가 약 120B이므로 8천 개(약 1MB, 2초 간격이면 4시간 반)로 둔다.
+const BUFFER_MAX = 8000;
 
 type Listener = (points: RawPoint[]) => void;
 const listeners = new Set<Listener>();
@@ -44,10 +48,16 @@ export async function clearBuffer() {
 }
 
 async function appendBuffer(points: RawPoint[]) {
-  const prev = await readBuffer();
-  // 오래 달려도 버퍼가 무한히 커지지 않게 최근 2만 개만 둔다.
-  const next = prev.concat(points).slice(-20000);
-  await AsyncStorage.setItem(RUN_BUFFER_KEY, JSON.stringify(next));
+  let prev: RawPoint[] = [];
+  try {
+    const raw = await AsyncStorage.getItem(RUN_BUFFER_KEY);
+    prev = raw ? (JSON.parse(raw) as RawPoint[]) : [];
+  } catch {
+    // 읽지 못하면 기존 값을 덮어쓰지 않는다.
+    return;
+  }
+  const next = prev.concat(points).slice(-BUFFER_MAX);
+  await AsyncStorage.setItem(RUN_BUFFER_KEY, JSON.stringify(next)).catch(() => {});
 }
 
 if (Platform.OS !== 'web') {
@@ -59,10 +69,22 @@ if (Platform.OS !== 'web') {
       const points = locations.map(toRawPoint);
       if (listeners.size > 0) {
         for (const fn of listeners) fn(points);
-      } else {
-        // 앱이 백그라운드에서 다시 깨어난 경우: 화면이 돌아오면 버퍼에서 읽는다.
-        await appendBuffer(points);
+        return;
       }
+      // 화면이 없는 상태(앱이 백그라운드에서 다시 깨어남). 진행 중인 러닝이 아니면 작업을 멈춘다.
+      const active = await AsyncStorage.getItem(RUN_ACTIVE_KEY).catch(() => null);
+      if (!active) {
+        await Location.stopLocationUpdatesAsync(RUN_TASK).catch(() => {});
+        return;
+      }
+      // 너무 오래된 러닝(12시간 이상)은 잊은 것으로 보고 멈춘다.
+      if (Date.now() - Number(active) > 12 * 3600 * 1000) {
+        await Location.stopLocationUpdatesAsync(RUN_TASK).catch(() => {});
+        await AsyncStorage.removeItem(RUN_ACTIVE_KEY).catch(() => {});
+        await clearBuffer();
+        return;
+      }
+      await appendBuffer(points);
     });
   } catch (e) {
     console.warn('[run] defineTask 실패', e);

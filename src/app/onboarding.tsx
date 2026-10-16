@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { requestForegroundPermission } from '@/location/locate';
@@ -14,8 +14,11 @@ export default function Onboarding() {
   const [busy, setBusy] = useState(false);
   const set = useGame((s) => s.set);
   const hasSave = useGame((s) => !!s.save);
+  const done = useRef(false);
 
   const finish = () => {
+    if (done.current) return;
+    done.current = true;
     set({ onboarded: true });
     router.replace(hasSave ? '/' : '/start');
   };
@@ -57,7 +60,8 @@ export default function Onboarding() {
       <Screen>
         <View style={styles.block}>
           <T size={20} style={styles.lead}>위치 없이 시작합니다</T>
-          <T dim>시작할 구역은 직접 고를 수 있습니다. 러닝(선 긋기)과 구역 발견 기능은 꺼집니다. 설정에서 언제든 바꿀 수 있습니다.</T>
+          <T dim>시작할 구역은 직접 고를 수 있습니다. 러닝(선 긋기)과 구역 발견 기능은 꺼집니다.</T>
+          <T faint size={13}>법정대리인 동의 절차가 마련되기 전까지는 바꿀 수 없습니다. 잘못 고르셨다면 설정의 "모든 데이터 초기화" 후 다시 선택해 주세요.</T>
         </View>
         <Button testID="onb-minor-ok" kind="primary" label="계속" onPress={finish} />
       </Screen>
@@ -70,11 +74,15 @@ export default function Onboarding() {
         <T size={20} style={styles.lead}>위치 정보 이용 안내</T>
         <Card>
           <T style={styles.item}>· 시작 구역 판별: 현재 위치를 기기 안에서 시·군·구 이름으로만 바꿉니다. 좌표는 저장하지 않습니다.</T>
-          <T style={styles.item}>· 구역 발견: 앱을 켤 때 있는 시·군·구를 기록해 새 구역을 해금합니다.</T>
-          <T style={styles.item}>· 러닝(선택): 달린 길을 약 110m 크기 블록으로 바꿔 기기에만 저장합니다. 원래 경로 좌표는 러닝이 끝나면 지웁니다.</T>
+          <T style={styles.item}>· 구역 발견: 이야기 화면을 열 때 지금 있는 시·군·구를 기기 안에서 확인하고, 처음 온 구역이면 기록해 해금합니다.</T>
+          <T style={styles.item}>· 러닝(선택): 러닝을 시작한 동안에만 위치를 받아, 달린 길을 약 110m 크기 블록으로 바꿔 기기에만 저장합니다. 원래 경로 좌표는 러닝이 끝나면 지웁니다.</T>
           <T style={[styles.item, { color: colors.accent }]}>· 위치 정보는 서버로 전송하지 않습니다.</T>
         </Card>
         <T faint size={13}>동의하지 않아도 구역을 직접 골라 처음부터 끝까지 플레이할 수 있습니다. 설정에서 언제든 철회할 수 있습니다.</T>
+        <View style={{ flexDirection: 'row', gap: space.lg }}>
+          <T size={13} style={styles.link} onPress={() => router.push({ pathname: '/legal', params: { doc: 'lbs' } })}>위치기반서비스 이용약관</T>
+          <T size={13} style={styles.link} onPress={() => router.push({ pathname: '/legal', params: { doc: 'privacy' } })}>개인정보처리방침</T>
+        </View>
       </View>
       <Button
         testID="onb-consent-yes"
@@ -85,6 +93,7 @@ export default function Onboarding() {
           setBusy(true);
           const granted = await requestForegroundPermission();
           setBusy(false);
+          if (done.current) return; // 그사이 "위치 없이 하기"를 눌렀다
           set({ locationConsent: granted });
           finish();
         }}
@@ -99,4 +108,5 @@ const styles = StyleSheet.create({
   lead: { lineHeight: 32, marginBottom: space.sm },
   para: { marginTop: space.xs },
   item: { marginVertical: space.xs, fontSize: 15, lineHeight: 24 },
+  link: { color: colors.accent, textDecorationLine: 'underline' },
 });

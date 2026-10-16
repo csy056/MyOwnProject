@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
-import { Alert, Platform, StyleSheet, Switch, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Linking, Platform, StyleSheet, Switch, View } from 'react-native';
 
 import { unloadEngine } from '@/engine/gameSession';
-import { requestForegroundPermission } from '@/location/locate';
-import { buy, PRODUCTS } from '@/monetization';
+import { isPermissionBlocked, requestForegroundPermission } from '@/location/locate';
+import { buy, PRODUCTS, restorePurchases } from '@/monetization';
+import { stopAllTracking } from '@/run/tracker';
 import { useGame } from '@/state/store';
 import { Button, Card, Divider, Header, Screen, T } from '@/ui/components';
 import { colors, space, type TextSize } from '@/ui/theme';
@@ -26,17 +28,24 @@ function Row({ label, sub, value, onChange }: { label: string; sub?: string; val
         <T>{label}</T>
         {sub ? <T faint size={13}>{sub}</T> : null}
       </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: colors.accent, false: colors.line }} />
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        accessibilityLabel={label}
+        accessibilityHint={sub}
+        trackColor={{ true: colors.accent, false: colors.line }}
+      />
     </View>
   );
 }
 
 export default function Settings() {
   const s = useGame();
+  const [note, setNote] = useState<string | null>(null);
 
   return (
     <Screen>
-      <Header title="설정" onBack={() => router.back()} />
+      <Header title="설정" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       <T faint size={13}>글자 크기</T>
       <View style={styles.sizes}>
@@ -60,19 +69,39 @@ export default function Settings() {
           sub="시작 구역 판별, 구역 발견, 러닝. 좌표는 기기 안에서 구역·블록으로만 바뀌고 전송되지 않습니다."
           value={s.locationConsent}
           onChange={async (v) => {
-            if (!v) return s.set({ locationConsent: false });
+            setNote(null);
+            if (!v) {
+              // 철회하면 진행 중인 위치 수집과 임시 저장소를 바로 지운다.
+              s.set({ locationConsent: false });
+              await stopAllTracking();
+              return;
+            }
+            // 나이 확인을 거치지 않았으면 먼저 묻는다. (임의로 만 14세 이상으로 보지 않는다)
+            if (s.ageConfirmed !== true) {
+              s.set({ onboarded: false });
+              router.replace('/onboarding');
+              return;
+            }
             const ok = await requestForegroundPermission();
-            s.set({ locationConsent: ok, ageConfirmed: s.ageConfirmed ?? true });
+            s.set({ locationConsent: ok });
+            if (!ok && (await isPermissionBlocked())) setNote('기기 설정에서 이 앱의 위치 접근이 꺼져 있습니다.');
           }}
         />
       )}
+      {note ? (
+        <View style={{ gap: space.xs }}>
+          <T dim size={13}>{note}</T>
+          <Button kind="ghost" label="기기 설정 열기" onPress={() => Linking.openSettings().catch(() => {})} />
+        </View>
+      ) : null}
       <Button
         kind="ghost"
         label="러닝 기록과 블록 지도 삭제"
         onPress={() =>
-          confirm('러닝 기록 삭제', '되찾은 블록, 원정 기록, 무전 해금이 모두 지워집니다.', () =>
-            s.set({ ownedCells: {}, totals: { runs: 0, km: 0, loops: 0, cells: 0 }, runHistory: [], pendingRun: null, radioRead: {} }),
-          )
+          confirm('러닝 기록 삭제', '되찾은 블록, 원정 기록, 무전 해금이 모두 지워집니다.', () => {
+            s.set({ ownedCells: {}, totals: { runs: 0, km: 0, loops: 0, cells: 0 }, runHistory: [], pendingRun: null, radioRead: {} });
+            stopAllTracking();
+          })
         }
       />
 
@@ -86,15 +115,26 @@ export default function Settings() {
           <Button label={`${PRODUCTS.supporter_pack.title} · ${PRODUCTS.supporter_pack.price}`} sub={PRODUCTS.supporter_pack.description} onPress={() => buy('supporter_pack')} />
         </>
       )}
+      <Button
+        kind="ghost"
+        label="구매 복원"
+        onPress={async () => setNote((await restorePurchases()) ? '구매를 복원했습니다.' : '복원할 구매가 없습니다.')}
+      />
       <T faint size={12}>현재 빌드는 결제·광고 시뮬레이션입니다. 실제 결제는 일어나지 않습니다.</T>
+
+      <Divider />
+      <T faint size={13}>약관</T>
+      <Button kind="ghost" label="위치기반서비스 이용약관" onPress={() => router.push({ pathname: '/legal', params: { doc: 'lbs' } })} />
+      <Button kind="ghost" label="개인정보처리방침" onPress={() => router.push({ pathname: '/legal', params: { doc: 'privacy' } })} />
 
       <Divider />
       <Button
         kind="danger"
         label="모든 데이터 초기화"
         onPress={() =>
-          confirm('모든 데이터 초기화', '진행 중인 이야기, 기록, 러닝 기록, 동의 내역이 모두 지워집니다.', () => {
+          confirm('모든 데이터 초기화', '진행 중인 이야기, 기록, 러닝 기록, 동의 내역이 모두 지워집니다. (구매 내역은 남습니다)', () => {
             unloadEngine();
+            stopAllTracking();
             s.wipeAll();
             router.replace('/onboarding');
           })

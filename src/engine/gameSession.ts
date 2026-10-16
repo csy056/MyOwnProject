@@ -1,10 +1,13 @@
 import storyJson from '@/story/story.json';
+import storyVersion from '@/story/version.json';
 import { isNight } from '@/location/daynight';
 import { useGame, type Save, type Screen, type World } from '@/state/store';
 
 import { StoryEngine, type Stats, type Step } from './storyEngine';
 
 // 스토리 엔진 하나를 앱 전체에서 공유한다. 화면은 zustand 저장소의 save.screen 을 그린다.
+
+export const STORY_VERSION: string = (storyVersion as { version: string }).version;
 
 let engine: StoryEngine | null = null;
 
@@ -33,17 +36,43 @@ function stepToScreen(step: Step): Screen {
   };
 }
 
-function record(step: Step, e: StoryEngine) {
+function record(step: Step) {
   const store = useGame.getState();
-  if (step.clues.length) store.addClues(step.clues, e.stats().day);
+  if (step.clues.length) store.addClues(step.clues);
   if (step.ended && step.endingId) store.markEnding(step.endingId);
 }
 
 function advance(e: StoryEngine): Step {
   e.setVar('is_night', isNight());
   const step = e.advance();
-  record(step, e);
+  record(step);
   return step;
+}
+
+/**
+ * 저장된 ink 상태로 엔진을 만든다.
+ * 스토리가 바뀌었거나 상태를 읽을 수 없으면 변수(체력, 단서, 장 진행 등)만 옮기고 허브에서 이어 간다.
+ * 허브에 도착하기 전(프롤로그 중)이었다면 null.
+ */
+function loadEngine(inkState: string, version: string | undefined): { engine: StoryEngine; migrated: boolean } | null {
+  if (version === STORY_VERSION) {
+    try {
+      const e = createEngine();
+      e.loadState(inkState);
+      return { engine: e, migrated: false };
+    } catch (err) {
+      console.warn('[story] 저장 상태를 불러오지 못해 옮긴다', err);
+    }
+  }
+  try {
+    const e = createEngine();
+    if (!e.migrateVariablesFrom(inkState)) return null;
+    e.jumpTo('hub');
+    return { engine: e, migrated: true };
+  } catch (err) {
+    console.warn('[story] 저장 상태를 옮기지 못했다', err);
+    return null;
+  }
 }
 
 export function getEngine(): StoryEngine | null {
@@ -60,21 +89,30 @@ export function startNewGame(world: World) {
   e.setVars(worldVars(world));
   const step = advance(e);
   engine = e;
-  const save: Save = { inkState: e.saveState(), screen: stepToScreen(step), startedAt: Date.now() };
+  const save: Save = { inkState: e.saveState(), storyVersion: STORY_VERSION, screen: stepToScreen(step), startedAt: Date.now() };
   useGame.getState().setSave(save);
   applyPendingRun();
 }
 
-/** 저장된 게임을 엔진에 불러온다. 이미 불러왔으면 그대로 쓴다. */
+/** 저장된 게임을 엔진에 불러온다. 이미 불러왔으면 그대로 쓴다. 절대 예외를 던지지 않는다. */
 export function ensureLoaded(): boolean {
   const { save, world } = useGame.getState();
   if (!save || !world) return false;
   if (engine) return true;
-  const e = createEngine();
-  e.loadState(save.inkState);
+  const loaded = loadEngine(save.inkState, save.storyVersion);
+  if (!loaded) {
+    // 프롤로그 도중의 저장인데 스토리가 바뀌었다. 같은 구역에서 처음부터 다시 시작한다.
+    startNewGame(world);
+    return true;
+  }
+  const e = loaded.engine;
   // 위치 정보는 저장 이후 바뀌었을 수 있으므로 다시 넣는다. (시작 구역은 게임 동안 유지)
   e.setVars(worldVars(world));
   engine = e;
+  if (loaded.migrated) {
+    const step = advance(e);
+    useGame.getState().setSave({ ...save, inkState: e.saveState(), storyVersion: STORY_VERSION, screen: stepToScreen(step), rewind: undefined });
+  }
   applyPendingRun();
   return true;
 }
@@ -86,7 +124,13 @@ export function unloadEngine() {
 function persist(screen: Screen, rewind?: Save['rewind']) {
   const store = useGame.getState();
   if (!engine || !store.save) return;
-  store.setSave({ ...store.save, inkState: engine.saveState(), screen, rewind: rewind ?? store.save.rewind });
+  store.setSave({
+    ...store.save,
+    inkState: engine.saveState(),
+    storyVersion: STORY_VERSION,
+    screen,
+    rewind: rewind ?? store.save.rewind,
+  });
 }
 
 /**
@@ -106,11 +150,14 @@ function refreshHubIfIdle() {
   persist({ ...stepToScreen(step), pages, pageIndex: Math.min(screen.pageIndex, pages.length - 1) });
 }
 
+function gameEnded(): boolean {
+  return !!useGame.getState().save?.screen.ended;
+}
+
 /** 러닝 결과를 스토리 변수에 반영한다. 보고는 다음 허브에서 할 수 있다. */
 export function applyPendingRun() {
   if (!engine) return;
   const store = useGame.getState();
-  const p = store.consumePendingRun();
   const t = store.totals;
   engine.setVars({
     run_count: t.runs,
@@ -118,6 +165,9 @@ export function applyPendingRun() {
     cells_total: t.cells,
     loops_total: t.loops,
   });
+  // 끝난 게임에는 보급을 넣지 않는다. 되감기나 새 게임에서 반영된다.
+  if (gameEnded()) return;
+  const p = store.consumePendingRun();
   if (!p) return;
   engine.setVars({
     pending_debrief: true,
@@ -134,7 +184,7 @@ export function applyPendingRun() {
 
 /** 다른 구역을 발견했을 때 부품 1개를 준다. (L3) */
 export function grantDiscoveryReward() {
-  if (!engine) return;
+  if (!engine || gameEnded()) return;
   engine.setVar('parts', Number(engine.getVar('parts')) + 1);
   const save = useGame.getState().save;
   if (save) persist(save.screen);
@@ -150,7 +200,7 @@ export function nextPage() {
 export function choose(index: number) {
   const store = useGame.getState();
   if (!engine || !store.save) return;
-  const rewind = { inkState: engine.saveState(), screen: store.save.screen };
+  const rewind = { inkState: engine.saveState(), screen: store.save.screen, storyVersion: STORY_VERSION };
   engine.choose(index);
   const step = advance(engine);
   persist(stepToScreen(step), rewind);
@@ -160,10 +210,15 @@ export function choose(index: number) {
 export function rewindLastChoice(): boolean {
   const store = useGame.getState();
   const rw = store.save?.rewind;
-  if (!rw) return false;
+  if (!rw || !store.world) return false;
+  if (rw.storyVersion !== STORY_VERSION) return false; // 다른 버전의 스냅숏은 쓰지 않는다
   const e = createEngine();
-  e.loadState(rw.inkState);
-  e.setVars(worldVars(store.world!));
+  try {
+    e.loadState(rw.inkState);
+  } catch {
+    return false;
+  }
+  e.setVars(worldVars(store.world));
   const clamp = (v: number) => Math.max(0, Math.min(10, v));
   e.setVars({
     hp: clamp(Number(e.getVar('hp')) + 2),
@@ -171,7 +226,9 @@ export function rewindLastChoice(): boolean {
     food: Number(e.getVar('food')) + 2,
   });
   engine = e;
-  store.setSave({ ...store.save!, inkState: e.saveState(), screen: rw.screen, rewind: undefined });
+  store.setSave({ ...store.save!, inkState: e.saveState(), storyVersion: STORY_VERSION, screen: rw.screen, rewind: undefined });
+  // 끝난 게임이라 미뤄 둔 원정 보급이 있으면 이제 반영한다.
+  applyPendingRun();
   return true;
 }
 

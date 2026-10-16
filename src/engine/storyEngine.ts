@@ -23,7 +23,7 @@ export type Step = {
   choices: ChoiceView[];
   ended: boolean;
   endingId?: string;
-  clues: string[];
+  clues: { title: string; day: number }[];
 };
 
 export type Stats = {
@@ -90,7 +90,7 @@ export class StoryEngine {
   /** 다음 선택지나 끝까지 진행하고, 그 사이 출력을 화면 단위로 묶어 돌려준다. */
   advance(): Step {
     const pages: Page[] = [];
-    const clues: string[] = [];
+    const clues: Step['clues'] = [];
     let endingId: string | undefined;
     let page: Page = { hub: false, lines: [] };
 
@@ -122,7 +122,8 @@ export class StoryEngine {
       const trimmed = text.trim();
       if (trimmed) page.lines.push({ kind: 'text', text: trimmed });
       if (clue) {
-        clues.push(clue);
+        // 단서를 찾은 그 순간의 날짜로 기록한다. (같은 진행 안에서 하루가 지나갈 수 있다)
+        clues.push({ title: clue, day: Number(this.getVar('day')) || 0 });
         page.lines.push({ kind: 'clue', text: clue });
       }
     }
@@ -147,6 +148,31 @@ export class StoryEngine {
 
   loadState(json: string) {
     this.story.state.LoadJson(json);
+  }
+
+  /**
+   * 다른 버전의 스토리에서 저장한 상태에서 전역 변수만 옮겨 온다. (위치는 옮기지 않는다)
+   * 허브에 한 번이라도 도착했던 저장이면 true.
+   */
+  migrateVariablesFrom(json: string): boolean {
+    const old = JSON.parse(json) as { variablesState?: Record<string, unknown>; visitCounts?: Record<string, number> };
+    const vars = old.variablesState ?? {};
+    for (const [name, raw] of Object.entries(vars)) {
+      // ink 저장 형식: 문자열은 "^값", 숫자·불은 그대로. 그 밖(목록, 이동 대상)은 옮기지 않는다.
+      let value: InkValue;
+      if (typeof raw === 'string') {
+        if (!raw.startsWith('^')) continue;
+        value = raw.slice(1);
+      } else if (typeof raw === 'number' || typeof raw === 'boolean') {
+        value = raw;
+      } else continue;
+      try {
+        this.setVar(name, value);
+      } catch {
+        // 새 스토리에 없는 변수는 버린다.
+      }
+    }
+    return (old.visitCounts?.hub ?? 0) > 0;
   }
 
   /** 지정한 노트로 바로 이동한다. 디버그·테스트용. */

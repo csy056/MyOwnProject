@@ -8,6 +8,7 @@ export const RUN_RULES = {
   maxSpeedMps: 7, // 25.2km/h 초과 구간은 차량으로 보고 버린다
   vehicleStreak: 4, // 연속 초과 횟수가 이만큼이면 "차량 의심" 경고
   minMoveM: 3, // 이보다 작은 이동은 GPS 떨림으로 본다
+  minSpeedMps: 0.3, // 이보다 느린 이동(시속 약 1km)은 제자리 떨림으로 본다
   maxGapS: 60, // 신호가 이보다 오래 끊기면 그 사이 이동은 세지 않는다
   maxSegmentM: 400,
   pathSampleM: 10,
@@ -30,7 +31,7 @@ type PathPt = { lat: number; lon: number; cumM: number };
 export type RunSession = {
   startedAt: number;
   endedAt?: number;
-  last?: { lat: number; lon: number; t: number };
+  last?: { lat: number; lon: number; t: number; acc: number };
   distanceM: number;
   movingMs: number;
   cells: Record<CellId, 1>; // 이번 러닝에서 밟거나 포위한 블록
@@ -93,8 +94,9 @@ export function addPoint(s: RunSession, p: RawPoint, isOwned: (id: CellId) => bo
     return events;
   }
 
+  const acc = p.accuracy ?? 0;
   if (!s.last) {
-    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp };
+    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp, acc };
     s.path.push({ lat: p.lat, lon: p.lon, cumM: 0 });
     claim(s, [cellOf(p.lat, p.lon)], isOwned);
     return events;
@@ -104,25 +106,42 @@ export function addPoint(s: RunSession, p: RawPoint, isOwned: (id: CellId) => bo
   if (dt <= 0) return events;
   const d = haversineM(s.last.lat, s.last.lon, p.lat, p.lon);
 
-  // 오래 끊겼다가 돌아오면 그 사이 이동은 세지 않고 새로 시작한다.
+  // 오래 끊겼다가 멀리서 돌아오면 그 사이 이동은 세지 않고 새로 시작한다.
+  // 거의 제자리였다면(신호 대기, 신발 끈) 멈춘 것으로 보고 경로를 이어 간다.
+  const paused = dt > RUN_RULES.maxGapS && d <= RUN_RULES.loopCloseM;
+  if (paused) {
+    s.last = { ...s.last, t: p.timestamp };
+    return events;
+  }
   if (dt > RUN_RULES.maxGapS || d > RUN_RULES.maxSegmentM) {
-    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp };
+    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp, acc };
     s.path = [{ lat: p.lat, lon: p.lon, cumM: s.distanceM }];
     return events;
   }
-  if (d < RUN_RULES.minMoveM) return events;
+  // 제자리에서도 GPS는 몇 m씩 흔들린다. 두 위치의 정확도를 더한 거리 안쪽은 떨림으로 본다.
+  // 기준점을 옮기지 않으므로 천천히 걸어도 거리가 쌓이면 결국 넘어선다.
+  const jitter = Math.max(RUN_RULES.minMoveM, s.last.acc + acc);
+  if (d < jitter) return events;
 
   const speed = d / dt;
+  // 한참 제자리에 있다가 떨림이 기준을 넘은 경우: 거리로 세지 않고 기준점만 옮긴다.
+  if (speed < RUN_RULES.minSpeedMps) {
+    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp, acc };
+    return events;
+  }
   if (speed > RUN_RULES.maxSpeedMps) {
     s.rejected.speed++;
     s.speedStreak++;
-    if (s.speedStreak >= RUN_RULES.vehicleStreak && !s.vehicleSuspect) {
-      s.vehicleSuspect = true;
-      events.push({ type: 'vehicle' });
+    if (s.speedStreak >= RUN_RULES.vehicleStreak) {
+      if (!s.vehicleSuspect) {
+        s.vehicleSuspect = true;
+        events.push({ type: 'vehicle' });
+      }
+      // 차량 이동이 이어지면 그 뒤에 엉뚱하게 이어 붙지 않도록 기준점을 옮긴다.
+      s.last = { lat: p.lat, lon: p.lon, t: p.timestamp, acc };
+      s.path = [{ lat: p.lat, lon: p.lon, cumM: s.distanceM }];
     }
-    // 차량 구간 뒤에 엉뚱하게 이어 붙지 않도록 기준점을 옮긴다.
-    s.last = { lat: p.lat, lon: p.lon, t: p.timestamp };
-    s.path = [{ lat: p.lat, lon: p.lon, cumM: s.distanceM }];
+    // 한두 번 튄 위치는 버리고 기준점은 그대로 둔다.
     return events;
   }
   s.speedStreak = 0;
@@ -131,7 +150,7 @@ export function addPoint(s: RunSession, p: RawPoint, isOwned: (id: CellId) => bo
   s.distanceM += d;
   if (speed > 0.5) s.movingMs += dt * 1000;
   claim(s, cellsAlongSegment(s.last.lat, s.last.lon, p.lat, p.lon), isOwned);
-  s.last = { lat: p.lat, lon: p.lon, t: p.timestamp };
+  s.last = { lat: p.lat, lon: p.lon, t: p.timestamp, acc };
 
   const tail = s.path[s.path.length - 1];
   if (!tail || haversineM(tail.lat, tail.lon, p.lat, p.lon) >= RUN_RULES.pathSampleM) {
@@ -151,9 +170,13 @@ export function addPoint(s: RunSession, p: RawPoint, isOwned: (id: CellId) => bo
         s.loops++;
         s.loopCells += inside.length;
         events.push({ type: 'loop', cells: inside.length, newCells: added });
+        // 같은 고리를 다시 세지 않도록 경로를 새로 시작한다.
+        s.path = [{ lat: p.lat, lon: p.lon, cumM: s.distanceM }];
+      } else {
+        // 갔다가 되돌아온 짧은 왕복은 고리가 아니다. 왕복 구간만 잘라 내고 앞의 경로는 남겨,
+        // 더 큰 고리가 나중에 닫힐 수 있게 한다.
+        s.path = s.path.slice(0, i + 1);
       }
-      // 같은 고리를 다시 세지 않도록 경로를 새로 시작한다.
-      s.path = [{ lat: p.lat, lon: p.lon, cumM: s.distanceM }];
       break;
     }
   }
@@ -201,8 +224,9 @@ export function summarize(s: RunSession, now: number): RunSummary {
 
 export function formatPace(sec: number): string {
   if (!sec || !Number.isFinite(sec)) return "--'--\"";
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
+  const t = Math.round(sec);
+  const m = Math.floor(t / 60);
+  const s = t % 60;
   return `${m}'${String(s).padStart(2, '0')}"`;
 }
 

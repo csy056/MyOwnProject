@@ -32,10 +32,16 @@ export default function Records() {
 
   return (
     <Screen>
-      <Header title="기록" onBack={() => router.back()} />
-      <View style={styles.tabs}>
+      <Header title="기록" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <View style={styles.tabs} accessibilityRole="tablist">
         {TABS.map((t) => (
-          <Pressable key={t.key} testID={`tab-${t.key}`} onPress={() => setTab(t.key)} style={[styles.tab, tab === t.key && styles.tabOn]} accessibilityRole="tab">
+          <Pressable
+            key={t.key}
+            testID={`tab-${t.key}`}
+            onPress={() => setTab(t.key)}
+            style={[styles.tab, tab === t.key && styles.tabOn]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === t.key }}>
             <T size={14} style={tab === t.key ? { color: colors.bg } : undefined}>{t.label}</T>
           </Pressable>
         ))}

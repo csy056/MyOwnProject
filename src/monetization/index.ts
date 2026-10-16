@@ -17,6 +17,8 @@ export const PRODUCTS: Record<ProductId, { title: string; price: string; descrip
 export interface MonetizationProvider {
   showRewardedAd(placement: AdPlacement): Promise<boolean>;
   purchase(product: ProductId): Promise<boolean>;
+  /** 이 계정으로 이미 산 상품 목록 (기기 변경, 재설치 후 복원) */
+  restore(): Promise<ProductId[]>;
 }
 
 // ---- 시뮬레이션 제공자: 모달 상태 ----
@@ -34,6 +36,8 @@ const simulatedProvider: MonetizationProvider = {
     new Promise((resolve) => useSimulator.getState().setRequest({ kind: 'ad', placement, resolve })),
   purchase: (product) =>
     new Promise((resolve) => useSimulator.getState().setRequest({ kind: 'purchase', product, resolve })),
+  // 시뮬레이션에는 스토어 계정이 없으므로 복원할 것이 없다.
+  restore: async () => [],
 };
 
 let provider: MonetizationProvider = simulatedProvider;
@@ -49,7 +53,22 @@ export async function watchRewardedAd(placement: AdPlacement): Promise<boolean> 
 }
 
 export async function buy(product: ProductId): Promise<boolean> {
-  const ok = await provider.purchase(product);
-  if (ok) useGame.getState().set({ adFree: true });
-  return ok;
+  try {
+    const ok = await provider.purchase(product);
+    if (ok) useGame.getState().set({ adFree: true });
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 구매 복원. 복원할 구매가 있으면 true */
+export async function restorePurchases(): Promise<boolean> {
+  try {
+    const owned = await provider.restore();
+    if (owned.length > 0) useGame.getState().set({ adFree: true });
+    return owned.length > 0;
+  } catch {
+    return false;
+  }
 }

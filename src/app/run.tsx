@@ -1,15 +1,15 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, usePreventRemove } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { useEffect, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { newlyUnlocked, type RadioLog } from '@/content/radio';
 import { isNight } from '@/location/daynight';
 import { watchRewardedAd } from '@/monetization';
 import { computeReward, localDateKey, REWARD_RULES, type RunReward } from '@/run/rewards';
 import { addPoint, createSession, formatDuration, formatPace, summarize, type RawPoint, type RunEvent, type RunSession, type RunSummary } from '@/run/session';
-import { drainBuffer, startTracking, type Tracker } from '@/run/tracker';
+import { recoverInterruptedRun, startTracking, type Tracker } from '@/run/tracker';
 import { useGame } from '@/state/store';
 import { Button, Card, Header, Screen, T } from '@/ui/components';
 import { cellsToAscii, shareText } from '@/ui/share';
@@ -48,6 +48,9 @@ export default function Run() {
   const [result, setResult] = useState<Result | null>(null);
   const sessionRef = useRef<RunSession | null>(null);
   const trackerRef = useRef<Tracker | null>(null);
+  const mountedRef = useRef(true);
+  const stoppingRef = useRef(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
   const card = useShareCard();
 
   const allowed = consent && age === true;
@@ -58,10 +61,11 @@ export default function Run() {
     return () => clearInterval(id);
   }, [phase]);
 
-  // 앱이 러닝 중에 종료됐다가 돌아온 경우: 남은 버퍼를 기록으로 복구한다.
+  // 앱이 러닝 중에 종료됐다가 돌아온 경우: 남은 위치 작업을 멈추고, 쌓인 위치를 기록으로 복구한다.
   useEffect(() => {
-    drainBuffer().then((pts) => {
-      if (pts.length < 2) return;
+    mountedRef.current = true;
+    recoverInterruptedRun().then((pts) => {
+      if (!mountedRef.current || pts.length < 2 || sessionRef.current) return;
       const s = createSession(pts[0].timestamp);
       const owned = useGame.getState().ownedCells;
       for (const p of pts) addPoint(s, p, (id) => !!owned[id]);
@@ -69,11 +73,28 @@ export default function Run() {
       finish(pts[pts.length - 1].timestamp);
     });
     return () => {
+      mountedRef.current = false;
       trackerRef.current?.stop();
+      trackerRef.current = null;
       Speech.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 달리는 중에는 뒤로 가기(Android 뒤로, iOS 밀기)로 기록이 사라지지 않게 막는다.
+  const active = phase === 'running' || phase === 'starting';
+  usePreventRemove(active, () => {
+    if (phase === 'starting') return;
+    const msg = '원정을 끝내고 결과를 볼까요? 계속 달리려면 취소를 누르세요.';
+    if (Platform.OS === 'web') {
+      if (globalThis.confirm?.(msg)) stop();
+      return;
+    }
+    Alert.alert('원정 종료', msg, [
+      { text: '계속 달리기', style: 'cancel' },
+      { text: '종료하고 보고 보기', style: 'destructive', onPress: () => stop() },
+    ]);
+  });
 
   const pushLog = (line: string) => setLog((l) => [line, ...l].slice(0, 30));
 
@@ -109,14 +130,22 @@ export default function Run() {
     setPhase('starting');
     sessionRef.current = createSession(Date.now());
     setLog([]);
+    stoppingRef.current = false;
     try {
       const t = await startTracking(onPoints);
+      if (!mountedRef.current) {
+        // 시작하는 사이에 화면을 떠났다. 추적을 바로 멈춘다.
+        await t.stop();
+        return;
+      }
       trackerRef.current = t;
       setMode(t.mode);
       setPhase('running');
       pushLog(isNight() ? '밤의 원정. 밝은 옷, 주변 소리. 회색은 어둠을 좋아한다.' : '원정 시작. 첫 선을 긋는다.');
       speak('원정을 시작합니다. 화면을 보지 않아도 됩니다.');
     } catch (e) {
+      if (!mountedRef.current) return;
+      sessionRef.current = null;
       setError(e instanceof Error ? e.message : String(e));
       setPhase('ready');
     }
@@ -125,6 +154,8 @@ export default function Run() {
   const finish = (now = Date.now()) => {
     const s = sessionRef.current;
     if (!s) return;
+    // 같은 원정을 두 번 기록하지 않도록 바로 비운다. (두 번 누르기, 복구와 겹침)
+    sessionRef.current = null;
     const summary = summarize(s, now);
     const store = useGame.getState();
     const dateKey = localDateKey();
@@ -157,15 +188,18 @@ export default function Run() {
   };
 
   const stop = async () => {
-    await trackerRef.current?.stop();
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    const t = trackerRef.current;
     trackerRef.current = null;
+    await t?.stop();
     finish();
   };
 
   if (!allowed) {
     return (
       <Screen>
-        <Header title="선 긋기" onBack={() => router.back()} />
+        <Header title="선 긋기" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         <Card>
           <T>러닝 모드는 위치 정보가 필요합니다.</T>
           <T dim style={{ marginTop: space.sm }}>
@@ -190,7 +224,7 @@ export default function Run() {
       `${summary.loops ? ` 포위 ${summary.loops}회.` : ''} 평균 ${formatPace(summary.paceSec)}/km\n\n${ascii}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기 #러닝`;
     return (
       <Screen>
-        <Header title="원정 보고" onBack={() => router.back()} />
+        <Header title="원정 보고" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
         {!summary.valid ? (
           <Card>
             <T>너무 짧아 원정으로 기록되지 않았다.</T>
@@ -242,7 +276,9 @@ export default function Run() {
                 onPress={async () => {
                   if (!(await watchRewardedAd('run_double'))) return;
                   const st = useGame.getState();
-                  if (st.pendingRun) st.set({ pendingRun: { ...st.pendingRun, food: st.pendingRun.food * 2, parts: st.pendingRun.parts * 2 } });
+                  if (st.doubledByDate[dateKey]) return;
+                  // 이번 원정의 보급만큼만 한 번 더 준다.
+                  st.addPendingReward(reward.food, reward.parts);
                   st.set({ doubledByDate: { ...st.doubledByDate, [dateKey]: true } });
                   setResult({ ...result, doubled: true });
                 }}
@@ -253,13 +289,16 @@ export default function Run() {
               label="공유하기"
               sub="이미지 카드로 공유 (지원되지 않으면 문구로)"
               onPress={async () => {
-                if (!(await card.shareImage())) await shareText(shareMsg);
+                if (await card.shareImage()) return;
+                const r = await shareText(shareMsg);
+                setShareNote(r === 'copied' ? '공유 문구를 복사했습니다. 붙여 넣어 올려 주세요.' : r === 'failed' ? '공유하지 못했습니다.' : null);
               }}
             />
+            {shareNote ? <T dim size={13}>{shareNote}</T> : null}
           </>
         )}
-        {hasGame ? <Button kind="primary" label="거점으로 돌아가기" onPress={() => router.replace('/game')} /> : null}
-        <Button kind="ghost" label="처음 화면으로" onPress={() => router.replace('/')} />
+        {hasGame ? <Button kind="primary" label="거점으로 돌아가기" onPress={() => router.dismissTo('/game')} /> : null}
+        <Button kind="ghost" label="처음 화면으로" onPress={() => router.dismissTo('/')} />
       </Screen>
     );
   }
@@ -293,7 +332,7 @@ export default function Run() {
 
   return (
     <Screen>
-      <Header title="선 긋기" onBack={() => router.back()} />
+      <Header title="선 긋기" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <T size={20} style={{ marginBottom: space.sm }}>실제로 달린 길이 선이 된다.</T>
       <T dim>달린 길 위의 블록(약 110m)을 되찾는다. 출발한 자리로 돌아와 고리를 닫으면, 안쪽 블록까지 한꺼번에 되찾는다.</T>
       <Card>

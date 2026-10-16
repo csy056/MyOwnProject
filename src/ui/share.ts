@@ -7,7 +7,11 @@ import { parseCell } from '@/run/grid';
 // 공유 문구. 텍스트 게임답게 블록 지도를 문자 그림으로 붙인다.
 // 좌표나 실제 지도는 넣지 않는다. (모양만 보이는 축소 그림)
 
-export async function shareText(message: string): Promise<'shared' | 'copied' | 'failed'> {
+function isCancel(e: unknown): boolean {
+  return (e as { name?: string } | null)?.name === 'AbortError';
+}
+
+export async function shareText(message: string): Promise<'shared' | 'copied' | 'cancelled' | 'failed'> {
   try {
     if (Platform.OS === 'web') {
       const nav = globalThis.navigator as Navigator | undefined;
@@ -20,10 +24,11 @@ export async function shareText(message: string): Promise<'shared' | 'copied' | 
     }
     await Share.share({ message });
     return 'shared';
-  } catch {
+  } catch (e) {
+    if (isCancel(e)) return 'cancelled';
     try {
-      await Clipboard.setStringAsync(message);
-      return 'copied';
+      const ok = await Clipboard.setStringAsync(message);
+      return ok === false ? 'failed' : 'copied';
     } catch {
       return 'failed';
     }

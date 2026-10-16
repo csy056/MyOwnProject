@@ -99,9 +99,12 @@ export function lookupRegion(lat: number, lon: number): LookupResult {
 
   let best: RawRegion | null = null;
   let bestKm = Infinity;
+  // 구역 경계 상자를 SNAP_KM 만큼 넓혀 그 안에 드는 구역만 본다. (섬처럼 중심에서 먼 곳도 놓치지 않는다)
+  const mLat = SNAP_KM / 111;
+  const mLon = SNAP_KM / (111 * Math.cos((lat * Math.PI) / 180));
   for (const r of RAW) {
-    // 중심이 너무 먼 구역은 건너뛴다.
-    if (distanceKm(lat, lon, r.center[1], r.center[0]) > 80) continue;
+    const [minX, minY, maxX, maxY] = r.bbox;
+    if (lon < minX - mLon || lon > maxX + mLon || lat < minY - mLat || lat > maxY + mLat) continue;
     const d = nearestVertexKm(lon, lat, r);
     if (d < bestKm) {
       bestKm = d;

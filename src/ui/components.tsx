@@ -18,7 +18,7 @@ export function Screen({ children, scroll = true, style }: { children: ReactNode
   );
 }
 
-export function T({ children, style, dim, faint, mono, size, center }: {
+export function T({ children, style, dim, faint, mono, size, center, onPress }: {
   children: ReactNode;
   style?: StyleProp<TextStyle>;
   dim?: boolean;
@@ -26,9 +26,13 @@ export function T({ children, style, dim, faint, mono, size, center }: {
   mono?: boolean;
   size?: number;
   center?: boolean;
+  onPress?: () => void;
 }) {
   return (
     <Text
+      onPress={onPress}
+      accessibilityRole={onPress ? 'link' : undefined}
+      suppressHighlighting
       style={[
         styles.text,
         dim && { color: colors.textDim },
@@ -55,7 +59,8 @@ export function Button({ label, onPress, kind = 'default', disabled, testID, sub
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={sub ? `${label}, ${sub}` : label}
+      accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [

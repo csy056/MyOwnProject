@@ -1,9 +1,9 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { startNewGame, unloadEngine } from '@/engine/gameSession';
-import { locateRegion } from '@/location/locate';
+import { isPermissionBlocked, locateRegion } from '@/location/locate';
 import { DEFAULT_OUTSIDER_REGION_ID, regionById, regionsInSido, sidoList, type Region } from '@/location/regions';
 import { useGame, type World } from '@/state/store';
 import { Button, Card, Header, Screen, T } from '@/ui/components';
@@ -14,7 +14,7 @@ type Detect =
   | { state: 'locating' }
   | { state: 'inside'; region: Region }
   | { state: 'outside' }
-  | { state: 'failed'; reason: string };
+  | { state: 'failed'; reason: string; blocked: boolean };
 
 function toWorld(region: Region, route: World['route'], source: World['source']): World {
   return {
@@ -32,14 +32,21 @@ function toWorld(region: Region, route: World['route'], source: World['source'])
 
 export default function Start() {
   const consent = useGame((s) => s.locationConsent);
+  const age = useGame((s) => s.ageConfirmed);
   const [detect, setDetect] = useState<Detect>({ state: 'idle' });
   const [picking, setPicking] = useState<null | World['route']>(null);
+  const startingRef = useRef(false);
 
-  const runDetect = useCallback(async () => {
+  const runDetect = useCallback(async (request = false) => {
     setDetect({ state: 'locating' });
-    const r = await locateRegion();
+    const r = await locateRegion({ request });
     if (r.status === 'ok') setDetect(r.result.type === 'inside' ? { state: 'inside', region: r.result.region } : { state: 'outside' });
-    else setDetect({ state: 'failed', reason: r.status === 'denied' ? '위치 권한이 없습니다.' : '위치를 읽지 못했습니다.' });
+    else
+      setDetect({
+        state: 'failed',
+        reason: r.status === 'denied' ? '위치 권한이 없습니다.' : '위치를 읽지 못했습니다.',
+        blocked: r.status === 'denied' && (await isPermissionBlocked()),
+      });
   }, []);
 
   useEffect(() => {
@@ -47,6 +54,8 @@ export default function Start() {
   }, [consent, runDetect]);
 
   const begin = (region: Region, route: World['route'], source: World['source']) => {
+    if (startingRef.current) return; // 두 번 누르기 방지
+    startingRef.current = true;
     const world = toWorld(region, route, source);
     const store = useGame.getState();
     store.setWorld(world);
@@ -64,7 +73,7 @@ export default function Start() {
 
   return (
     <Screen>
-      <Header title="어디에서 시작할까" onBack={() => router.back()} />
+      <Header title="어디에서 시작할까" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       {detect.state === 'locating' ? (
         <Card><T dim>현재 위치를 시·군·구로 바꾸는 중…</T></Card>
@@ -96,7 +105,11 @@ export default function Start() {
       {detect.state === 'failed' ? (
         <Card>
           <T dim>{detect.reason} 구역을 직접 골라 시작할 수 있습니다.</T>
-          <Button label="다시 시도" kind="ghost" onPress={runDetect} />
+          {detect.blocked ? (
+            <Button label="기기 설정에서 위치 허용하기" kind="ghost" onPress={() => Linking.openSettings().catch(() => {})} />
+          ) : (
+            <Button label="다시 시도" kind="ghost" onPress={() => runDetect(true)} />
+          )}
         </Card>
       ) : null}
 
@@ -104,7 +117,7 @@ export default function Start() {
       <T faint size={13} style={{ marginBottom: space.xs }}>직접 고르기</T>
       <Button testID="pick-survivor" label="구역을 골라 생존자로 시작" onPress={() => setPicking('survivor')} />
       <Button testID="pick-outsider" label="구역을 골라 외부인으로 시작" onPress={() => setPicking('outsider')} />
-      {!consent ? <T faint size={13} style={{ marginTop: space.md }}>위치 사용에 동의하면 지금 있는 동네가 자동으로 무대가 됩니다. (설정)</T> : null}
+      {!consent && age !== false ? <T faint size={13} style={{ marginTop: space.md }}>위치 사용에 동의하면 지금 있는 동네가 자동으로 무대가 됩니다. (설정)</T> : null}
     </Screen>
   );
 }

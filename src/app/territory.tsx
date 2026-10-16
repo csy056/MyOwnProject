@@ -20,25 +20,47 @@ export default function Territory() {
   const size = Math.min(width - space.lg * 2, 520);
 
   const plan = useMemo(() => {
-    const cells = Object.keys(owned).map(parseCell);
-    if (cells.length === 0) return null;
+    const all = Object.keys(owned).map(parseCell);
+    if (all.length === 0) return null;
+    // 여러 동네에서 달렸으면 블록이 가장 많이 모인 곳(약 3.5km 단위 묶음과 그 이웃)만 그린다.
+    const BUCKET = 32;
+    const counts = new Map<string, number>();
+    for (const c of all) {
+      const k = `${Math.floor(c.row / BUCKET)}:${Math.floor(c.col / BUCKET)}`;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    const [bestKey] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [br, bc] = bestKey.split(':').map(Number);
+    const cells = all.filter((c) => Math.abs(Math.floor(c.row / BUCKET) - br) <= 1 && Math.abs(Math.floor(c.col / BUCKET) - bc) <= 1);
+    const hidden = all.length - cells.length;
+
     let r0 = Infinity, r1 = -Infinity, c0 = Infinity, c1 = -Infinity;
     for (const c of cells) {
       r0 = Math.min(r0, c.row); r1 = Math.max(r1, c.row);
       c0 = Math.min(c0, c.col); c1 = Math.max(c1, c.col);
     }
-    const span = Math.max(r1 - r0 + 1, c1 - c0 + 1, 12) + 4;
+    // 그리는 격자는 최대 60칸. 더 넓으면 여러 블록을 한 칸으로 묶는다.
+    const MAX_SPAN = 60;
+    const rawSpan = Math.max(r1 - r0 + 1, c1 - c0 + 1);
+    const k = Math.max(1, Math.ceil(rawSpan / (MAX_SPAN - 4)));
+    const merged = new Map<string, { row: number; col: number }>();
+    for (const c of cells) {
+      const row = Math.floor((c.row - r0) / k), col = Math.floor((c.col - c0) / k);
+      merged.set(`${row}:${col}`, { row, col });
+    }
+    const rows = Math.floor((r1 - r0) / k) + 1, cols = Math.floor((c1 - c0) / k) + 1;
+    const span = Math.max(rows, cols, 12) + 4;
     const cell = size / span;
-    const offR = r0 - Math.floor((span - (r1 - r0 + 1)) / 2);
-    const offC = c0 - Math.floor((span - (c1 - c0 + 1)) / 2);
-    return { cells, cell, span, offR, offC };
+    const offR = -Math.floor((span - rows) / 2);
+    const offC = -Math.floor((span - cols) / 2);
+    return { cells: [...merged.values()], cell, span, offR, offC, hidden, scale: k };
   }, [owned, size]);
 
   const ascii = cellsToAscii(Object.keys(owned));
 
   return (
     <Screen>
-      <Header title="되찾은 지도" onBack={() => router.back()} />
+      <Header title="되찾은 지도" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
       <View style={styles.statsRow}>
         <T dim size={14}>블록 {totals.cells}칸</T>
         <T dim size={14}>누적 {totals.km.toFixed(1)}km</T>
@@ -75,7 +97,10 @@ export default function Territory() {
           <Button kind="primary" label="원정 출발" onPress={() => router.push('/run')} />
         </Card>
       )}
-      <T faint size={12} style={{ marginTop: space.sm }}>한 칸 ≈ 110m. 위쪽이 북쪽. 실제 지도와 주소는 표시하지 않는다.</T>
+      <T faint size={12} style={{ marginTop: space.sm }}>
+        한 칸 ≈ {plan && plan.scale > 1 ? `${(0.11 * plan.scale).toFixed(1)}km` : '110m'}. 위쪽이 북쪽. 실제 지도와 주소는 표시하지 않는다.
+        {plan && plan.hidden > 0 ? ` 다른 곳에서 되찾은 ${plan.hidden}칸은 이 그림에서 빠졌다.` : ''}
+      </T>
 
       {history.length ? (
         <>

@@ -7,19 +7,16 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { useGame } from '@/state/store';
+import { onHydrationSettled } from '@/state/store';
 import { SimulatorHost } from '@/ui/SimulatorHost';
 import { colors } from '@/ui/theme';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
+// 저장소 불러오기가 끝날 때까지 기다린다. 실패해도 새 상태로 연다. (빈 화면에 갇히지 않게)
 function useStoreHydrated() {
-  const [hydrated, setHydrated] = useState(() => useGame.persist.hasHydrated());
-  useEffect(() => {
-    const unsub = useGame.persist.onFinishHydration(() => setHydrated(true));
-    if (useGame.persist.hasHydrated()) setHydrated(true);
-    return unsub;
-  }, []);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => onHydrationSettled(() => setHydrated(true)), []);
   return hydrated;
 }
 

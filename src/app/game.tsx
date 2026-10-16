@@ -36,12 +36,20 @@ function diff(a: Stats | null, b: Stats | null): Delta[] {
   return out;
 }
 
-function Meter({ value, color }: { value: number; color: string }) {
+function Meter({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <View style={styles.meter}>
-      {Array.from({ length: 10 }, (_, i) => (
-        <View key={i} style={[styles.meterCell, { backgroundColor: i < value ? color : colors.line }]} />
-      ))}
+    <View
+      style={styles.meterRow}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={label}
+      accessibilityValue={{ min: 0, max: 10, now: value, text: `${label} ${value}/10` }}>
+      <Text style={styles.statusLabel}>{label}</Text>
+      <View style={styles.meter}>
+        {Array.from({ length: 10 }, (_, i) => (
+          <View key={i} style={[styles.meterCell, { backgroundColor: i < value ? color : colors.line }]} />
+        ))}
+      </View>
     </View>
   );
 }
@@ -115,8 +123,9 @@ export default function Game() {
     nextPage();
   };
 
-  const ending = screen.ended ? ENDING_INFO[screen.endingId ?? ''] : undefined;
-  const canRewind = screen.ended && (screen.endingId === 'death' || screen.endingId === 'erased') && !!save.rewind;
+  // 엔딩 패널은 엔딩 본문의 마지막 장을 읽은 뒤에 보인다. 알 수 없는 엔딩이어도 버튼은 항상 보인다.
+  const ending = screen.ended && lastPage ? (ENDING_INFO[screen.endingId ?? ''] ?? { title: '이야기의 끝', hint: '' }) : undefined;
+  const canRewind = !!ending && (screen.endingId === 'death' || screen.endingId === 'erased') && !!save.rewind;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -129,10 +138,8 @@ export default function Game() {
             {world.dome} · {world.area} · {stats?.day ?? 412}일째 {night ? '· 밤' : ''}
           </Text>
           <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>체력</Text>
-            <Meter value={stats?.hp ?? 0} color={colors.danger} />
-            <Text style={styles.statusLabel}>정신</Text>
-            <Meter value={stats?.mind ?? 0} color={colors.mind} />
+            <Meter label="체력" value={stats?.hp ?? 0} color={colors.danger} />
+            <Meter label="정신" value={stats?.mind ?? 0} color={colors.mind} />
           </View>
           <Text style={styles.statusBottom}>
             식량 {stats?.food ?? 0} · 부품 {stats?.parts ?? 0} · 신뢰 {stats?.trust ?? 0} · 단서 {stats?.clues ?? 0}
@@ -189,7 +196,10 @@ export default function Game() {
               onPress={() =>
                 shareText(
                   `[경계선] ${world.dome} 벽 안, ${world.area}에서 ${stats?.day ?? 412}일째.\n엔딩: ${ending.title}\n\n달려라. 지도에서 지워지기 전에.\n#경계선 #선긋기`,
-                ).then((r) => r === 'copied' && setToast('공유 문구를 복사했습니다.'))
+                ).then((r) => {
+                  if (r === 'copied') setToast('공유 문구를 복사했습니다.');
+                  else if (r === 'failed') setToast('공유하지 못했습니다.');
+                })
               }
             />
             <Button
@@ -204,7 +214,7 @@ export default function Game() {
         ) : null}
       </ScrollView>
 
-      {!screen.ended ? (
+      {!screen.ended || !lastPage ? (
         <View style={styles.choices}>
           {!lastPage ? (
             <Button testID="btn-next" label="계속 ▸" onPress={onNext} />
@@ -243,7 +253,8 @@ const styles = StyleSheet.create({
   status: { flexDirection: 'row', gap: space.md, alignItems: 'center', paddingHorizontal: space.lg, paddingVertical: space.sm, borderBottomWidth: 1, borderBottomColor: colors.line },
   menu: { color: colors.text, fontSize: 26, width: 28 },
   statusTop: { color: colors.textDim, fontSize: 13, fontFamily: fonts.body },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
+  meterRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusLabel: { color: colors.textDim, fontSize: 12 },
   statusBottom: { color: colors.textFaint, fontSize: 12 },
   meter: { flexDirection: 'row', gap: 2, marginRight: 6 },

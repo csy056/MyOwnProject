@@ -52,8 +52,14 @@ describe('스토리 엔진', () => {
     const idx = hub.choices.findIndex((c) => c.text.includes('원정 보고'));
     expect(idx).toBeGreaterThanOrEqual(0);
     e.choose(hub.choices[idx].index);
-    const after = e.advance();
-    expect(after.pages.flatMap((p) => p.lines).length).toBeGreaterThan(0);
+    let step = e.advance();
+    expect(step.pages.flatMap((p) => p.lines).length).toBeGreaterThan(0);
+    // 보고 안에 선택지가 있으면 허브로 돌아올 때까지 진행한다.
+    for (let i = 0; i < 20 && !step.pages.some((p) => p.hub); i++) {
+      e.choose(step.choices[0].index);
+      step = e.advance();
+    }
+    expect(step.pages.some((p) => p.hub)).toBe(true);
     expect(e.getVar('pending_debrief')).toBe(false);
   });
 });
