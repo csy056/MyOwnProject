@@ -8,7 +8,7 @@
 | 스토리 | ink 스크립트 → `inkjs`로 실행 | 분기 스토리 전용 언어. 코드 없이 글로 쓴다. `scripts/compile-story.mjs`로 컴파일 |
 | 상태 | zustand + AsyncStorage | 모든 데이터는 기기 안에 저장. 서버 없음 |
 | 위치 | expo-location + 내장 시·군·구 경계 데이터 | 좌표를 기기 안에서 구역 이름으로만 바꾼다 |
-| 러닝 | expo-location + expo-task-manager(백그라운드) | 개발 빌드는 화면을 꺼도 기록, Expo Go·웹은 화면 켜 둠 |
+| 러닝 | expo-location + expo-task-manager | 개발 빌드는 화면을 꺼도 기록(Android 포그라운드 서비스, iOS 위치 표시줄). "항상 허용" 권한은 요청하지 않는다. Expo Go·웹은 화면 켜 둠 |
 | 음성·진동 | expo-speech, expo-haptics | 달리는 동안 화면을 보지 않게 |
 | 지도 그림 | react-native-svg | 지도 타일 없이 블록 격자만 그린다 |
 | 광고·결제 | `src/monetization` 추상화 + 시뮬레이션 | 계정이 생기면 실제 SDK로 바꾼다 |
@@ -24,6 +24,8 @@ scripts/
   playtest.mjs         자동 플레이 검사 (막힘, 엔딩 도달, 미완성 문구)
   build-regions.mjs    전국 경계 → src/data/regions.json
   make-icons.mjs       앱 아이콘 생성
+  play-cli.mjs         터미널에서 스토리를 한 단계씩 플레이 (기획 검토, 플레이테스트)
+  build-web-demo.mjs   웹 빌드를 한 장짜리 데모 페이지로 묶기 (정적 호스팅용)
 data/raw/              원본 경계 데이터 (KOSTAT 2013 단순화본)
 src/
   app/                 화면 (Expo Router: 파일 하나 = 화면 하나)
@@ -56,7 +58,8 @@ tests/                 단위 테스트 (jest)
 ```
 
 - 허브 선택지는 허브에 도착할 때 계산된다. 그래서 러닝 결과가 반영되면 허브를 다시 그린다 (`refreshHubIfIdle`).
-- 선택할 때마다 직전 상태를 `rewind`로 저장한다. 사망·회색 엔딩에서 보상형 광고로 되감는다.
+- 선택할 때마다 직전 상태를 `rewind`로 저장한다. 체력이나 정신이 바닥난 선택에서는 바로 엔딩으로 가므로, 사망·회색 엔딩에서 보상형 광고로 되감으면 그 선택 직전으로 돌아간다.
+- 저장에는 스토리 버전(컴파일 결과의 해시)이 붙는다. 업데이트로 스토리가 바뀌면 변수(체력, 단서, 장 진행)만 옮겨 허브에서 이어 간다.
 
 ## 실행과 검증
 
@@ -71,6 +74,15 @@ npm run check           # 위 셋 모두
 ```
 
 `npm start`, `npm run web` 전에 스토리가 자동으로 컴파일된다.
+
+## 웹 데모 만들기
+
+```bash
+npx expo export --platform web --output-dir dist
+node scripts/build-web-demo.mjs web-demo     # web-demo/index.html + js/*.js
+```
+
+웹 빌드는 화면별로 나누지 않고 스크립트 하나로 묶는다 (`app.json`의 `asyncRoutes.web: false`). 그래서 어떤 경로에 올려도 동작한다. 웹에서는 위치 권한 요청이 10초 안에 응답하지 않으면 거부로 보고 직접 선택으로 넘어간다.
 
 ## 빌드와 출시 (EAS)
 
