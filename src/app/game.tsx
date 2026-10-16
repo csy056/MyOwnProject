@@ -70,6 +70,7 @@ function HubPanel() {
     <View style={styles.hubPanel} accessibilityRole="summary">
       <Text style={styles.hubGoal}>{hints.goal}</Text>
       {hints.next ? <Text style={styles.hubGoal}>{hints.next}</Text> : null}
+      {hints.build ? <Text style={styles.hubGoal}>{hints.build}</Text> : null}
       {hints.warnings.map((w) => (
         <Text key={w} style={styles.hubWarn}>
           {w}

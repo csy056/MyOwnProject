@@ -85,7 +85,13 @@ export function currentStats(): Stats | null {
 }
 
 /** 허브에서 보여 줄 목표와 경고. 스토리 변수만 읽는다. */
-export function hubHints(): { goal: string; warnings: string[]; next: string | null } | null {
+const UPGRADES = [
+  { flag: 'up_water', name: '정수기', cost: 3, effect: '매일 체력 +1' },
+  { flag: 'up_generator', name: '발전기', cost: 4, effect: '매일 정신 +1' },
+  { flag: 'up_barricade', name: '방벽', cost: 5, effect: '밤 습격을 절반 막음' },
+] as const;
+
+export function hubHints(): { goal: string; warnings: string[]; next: string | null; build: string | null } | null {
   if (!engine) return null;
   const n = (k: string) => Number(engine!.getVar(k)) || 0;
   const chapter = n('chapter');
@@ -104,7 +110,13 @@ export function hubHints(): { goal: string; warnings: string[]; next: string | n
   else if (n('food') === 1) warnings.push('식량이 하루치 남았다.');
   if (n('hp') <= 3) warnings.push('체력이 낮다. 쉬거나 거점을 강화하라.');
   if (n('mind') <= 3) warnings.push('정신이 흔들린다. 쉬거나 사람들과 이야기하라.');
-  return { goal, warnings, next: nextRunMilestone() };
+  // 아직 짓지 않은 거점 강화와 비용 ("거점을 돌본다"에서 짓는다)
+  const left = UPGRADES.filter((u) => engine!.getVar(u.flag) !== true);
+  const parts = n('parts');
+  const build = left.length
+    ? `거점 강화 (부품 ${parts}개 보유): ${left.map((u) => `${u.name} ${u.cost}개 · ${u.effect}${parts >= u.cost ? ' (가능)' : ''}`).join(' / ')}`
+    : null;
+  return { goal, warnings, next: nextRunMilestone(), build };
 }
 
 /** 다음 러닝 이정표(무전 해금)까지의 진행도. 러닝을 한 번도 안 했으면 첫 원정을 권한다. */
